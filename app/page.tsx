@@ -47,17 +47,24 @@ const navItems: Array<{ id: Screen; label: string; icon: LucideIcon }> = [
 
 function WeatherScene({ scenario, compact = false }: { scenario: Scenario; compact?: boolean }) {
   return (
-    <div className={`weather-scene weather-${scenario} ${compact ? "is-compact" : ""}`} aria-hidden="true">
-      <div className="sun-disc" />
+    <div className={`weather-scene weather-${scenario} ${compact ? "is-compact" : ""}`} data-weather-motion={scenario} aria-hidden="true">
+      <div className="weather-color-wash" />
+      <div className="sun-disc"><span className="sun-rays">{Array.from({ length: 12 }, (_, index) => <i key={`ray-${index}`} style={{ "--ray": index } as React.CSSProperties} />)}</span></div>
       <div className="cloud cloud-a"><i /><i /><i /></div>
       <div className="cloud cloud-b"><i /><i /><i /></div>
       <div className="cloud cloud-c"><i /><i /><i /></div>
+      <div className="storm-cloud storm-cloud-a"><i /><i /><i /></div>
+      <div className="storm-cloud storm-cloud-b"><i /><i /><i /></div>
       <div className="rain-field rain-back">
         {Array.from({ length: 14 }, (_, index) => <i key={`back-${index}`} style={{ "--i": index } as React.CSSProperties} />)}
       </div>
       <div className="rain-field rain-front">
         {Array.from({ length: 18 }, (_, index) => <i key={`front-${index}`} style={{ "--i": index } as React.CSSProperties} />)}
       </div>
+      <div className="wind-streaks">{Array.from({ length: 7 }, (_, index) => <i key={`wind-${index}`} style={{ "--wind": index } as React.CSSProperties} />)}</div>
+      <div className="rain-ripples">{Array.from({ length: 5 }, (_, index) => <i key={`ripple-${index}`} style={{ "--ripple": index } as React.CSSProperties} />)}</div>
+      <svg className="lightning-bolt" viewBox="0 0 90 150" role="presentation"><path d="M55 3 17 82h31l-13 65 42-86H48L55 3Z" /></svg>
+      <div className="storm-flash" />
       <div className="horizon" />
     </div>
   );
@@ -71,6 +78,35 @@ function AppHeader({ eyebrow, badge, onBack }: { eyebrow: string; badge?: string
         <span>{eyebrow}</span>
       </div>
       {badge && <span className="header-badge">{badge}</span>}
+    </header>
+  );
+}
+
+function WeatherHeader({ scenario, setScenario }: { scenario: Scenario; setScenario: (scenario: Scenario) => void }) {
+  const options: Array<{ value: Scenario; label: string; icon: LucideIcon }> = [
+    { value: "clear", label: "clear weather", icon: SunMedium },
+    { value: "rain", label: "rain weather", icon: CloudRain },
+    { value: "storm", label: "storm weather", icon: CloudLightning },
+  ];
+  return (
+    <header className="weather-topbar">
+      <span className="weather-wordmark">WEATHER</span>
+      <div className="weather-topbar-actions">
+        <span className="weather-location">AUSTIN</span>
+        <div className="condition-switch" aria-label="Preview weather motion">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              className={scenario === option.value ? "is-active" : ""}
+              onClick={() => setScenario(option.value)}
+              aria-label={`Preview ${option.label}`}
+              aria-pressed={scenario === option.value}
+            >
+              <option.icon size={18} strokeWidth={1.8} />
+            </button>
+          ))}
+        </div>
+      </div>
     </header>
   );
 }
@@ -185,31 +221,38 @@ function HomeScreen({ scenario, setScenario, go, selected, saved }: {
   selected: string[];
   saved: boolean;
 }) {
-  const condition = scenario === "clear" ? { temp: "68°", label: "SUNNY", high: "78°", low: "59°", note: "Clear through 4 PM" }
-    : scenario === "rain" ? { temp: "64°", label: "RAIN", high: "70°", low: "58°", note: "Rain builds after 5 PM" }
-      : { temp: "62°", label: "STORMS", high: "68°", low: "57°", note: "Thunder risk after 6 PM" };
+  const conditions: Record<Scenario, { temp: string; label: string; high: string; low: string; note: string; hours: string[][] }> = {
+    clear: {
+      temp: "68°", label: "SUNNY", high: "78°", low: "59°", note: "Clear through 4 PM",
+      hours: [["NOW", "68°", "CLEAR"], ["11 AM", "71°", "CLEAR"], ["1 PM", "75°", "CLEAR"], ["4 PM", "74°", "CLOUD"], ["6 PM", "66°", "RAIN 24%"]],
+    },
+    rain: {
+      temp: "64°", label: "RAIN", high: "70°", low: "58°", note: "Steady rain · Southwest wind 9 mph",
+      hours: [["NOW", "64°", "RAIN"], ["11 AM", "65°", "RAIN"], ["1 PM", "67°", "LIGHT"], ["4 PM", "66°", "HEAVY"], ["6 PM", "63°", "RAIN 78%"]],
+    },
+    storm: {
+      temp: "62°", label: "STORMS", high: "68°", low: "57°", note: "Thunder risk · Gusts reach 24 mph",
+      hours: [["NOW", "62°", "STORM"], ["11 AM", "63°", "RAIN"], ["1 PM", "65°", "RAIN"], ["4 PM", "64°", "STORM"], ["6 PM", "61°", "RAIN 91%"]],
+    },
+  };
+  const condition = conditions[scenario];
   return (
     <section className="screen app-screen home-screen" data-screen="home">
       <div className="app-scroll-region">
-        <div className="home-hero">
+        <div className={`home-hero home-hero-${scenario}`} data-weather-state={scenario}>
           <WeatherScene scenario={scenario} />
-          <AppHeader eyebrow="WEATHER" badge="AUSTIN" />
+          <WeatherHeader scenario={scenario} setScenario={setScenario} />
           <div className="hero-content">
-          <div className="hero-meta">
-            <span>THU · JUL 23</span>
-            <div className="condition-switch" aria-label="Preview weather motion">
-              <button className={scenario === "clear" ? "is-active" : ""} onClick={() => setScenario("clear")} aria-label="Preview sunny weather"><SunMedium size={16} /></button>
-              <button className={scenario === "rain" ? "is-active" : ""} onClick={() => setScenario("rain")} aria-label="Preview rain"><CloudRain size={16} /></button>
-              <button className={scenario === "storm" ? "is-active" : ""} onClick={() => setScenario("storm")} aria-label="Preview storm"><CloudLightning size={16} /></button>
+            <div className="hero-meta"><span>THU · JUL 23</span></div>
+            <div className="hero-weather-copy" key={scenario}>
+              <div className="temperature-row"><strong>{condition.temp}</strong><div><span>{condition.label}</span><small>H {condition.high} · L {condition.low}</small></div></div>
+              <p>{condition.note}</p>
             </div>
           </div>
-          <div className="temperature-row"><strong>{condition.temp}</strong><div><span>{condition.label}</span><small>H {condition.high} · L {condition.low}</small></div></div>
-          <p>{condition.note}</p>
-          </div>
           <div className="hourly-strip" aria-label="Hourly forecast">
-          {[['NOW','68°','CLEAR'],['11 AM','71°','CLEAR'],['1 PM','75°','CLEAR'],['4 PM','74°','CLOUD'],['6 PM','66°',scenario === 'clear' ? 'RAIN 24%' : 'RAIN 78%']].map((hour) => (
-            <button key={hour[0]} onClick={() => hour[0] === '6 PM' && go('storm')}><small>{hour[0]}</small><b>{hour[1]}</b><span>{hour[2]}</span></button>
-          ))}
+            {condition.hours.map((hour) => (
+              <button key={hour[0]} onClick={() => (hour[0] === "6 PM" || hour[2] === "STORM") && go("storm")}><small>{hour[0]}</small><b>{hour[1]}</b><span>{hour[2]}</span></button>
+            ))}
           </div>
         </div>
         <main className="screen-body home-body">
@@ -400,7 +443,7 @@ export default function Home() {
   const [labOpen, setLabOpen] = useState(false);
 
   useEffect(() => {
-    const state = window.localStorage.getItem("weather-demo-v04");
+    const state = window.localStorage.getItem("weather-demo-v05");
     if (state) {
       try {
         const parsed = JSON.parse(state);
@@ -411,7 +454,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem("weather-demo-v04", JSON.stringify({ selected, saved }));
+    window.localStorage.setItem("weather-demo-v05", JSON.stringify({ selected, saved }));
   }, [selected, saved]);
 
   useEffect(() => {
@@ -427,7 +470,7 @@ export default function Home() {
     window.setTimeout(() => { setLoading(false); setSaved(true); setToast("Plan updated on Calendar and Watch"); }, 850);
   };
   const reset = () => {
-    window.localStorage.removeItem("weather-demo-v04");
+    window.localStorage.removeItem("weather-demo-v05");
     setSelected(["everyday", "commute", "meetings", "running"]); setChoice(null); setSaved(false); setScenario("clear"); setScreen("welcome");
   };
   const activeStep = useMemo(() => {
@@ -438,7 +481,7 @@ export default function Home() {
   return (
     <main className="demo-shell">
       <aside className="demo-guide">
-        <div><span className="guide-version">V0.4 · UNIFIED SYSTEM</span><h1>Weather is the product.<br />Your day is the context.</h1><p>This prototype connects forecast, context, action and feedback through one consistent mobile system.</p><a className="canvas-link" href="/design-system/">Open design system canvas <ArrowRight size={16} /></a></div>
+        <div><span className="guide-version">V0.5 · WEATHER IN MOTION</span><h1>Weather is the product.<br />Motion explains change.</h1><p>Clear, rain and storm now carry their own atmosphere, forecast state and motion language.</p><a className="canvas-link" href="/design-system/">Open design system canvas <ArrowRight size={16} /></a></div>
         <ol>{["Welcome & choose context", "Read today’s weather", "See plan impact", "Inspect storm detail", "Choose a Pro adaptation", "Apply and teach the model"].map((item, index) => <li key={item} className={activeStep.startsWith(String(index + 1).padStart(2, "0")) ? "is-active" : ""}><span>{String(index + 1).padStart(2, "0")}</span>{item}</li>)}</ol>
         <div className="guide-foot"><span>ACTIVE SCREEN</span><strong>{activeStep}</strong><button onClick={reset}>Restart demo</button></div>
       </aside>

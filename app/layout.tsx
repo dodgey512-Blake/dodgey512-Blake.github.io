@@ -7,8 +7,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://dodgey512-blake.github.io"),
-  title: "Weather V0.4 · Interactive Product Demo",
-  description: "A weather-first mobile product prototype with a unified component system and visible weather motion.",
+  title: "Weather V0.5 · Weather in Motion",
+  description: "A weather-first mobile product prototype with distinct clear, rain and storm motion systems.",
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
   openGraph: {
     title: "Weather, made personal",
