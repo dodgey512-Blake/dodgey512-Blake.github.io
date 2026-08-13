@@ -1,4 +1,4 @@
-name: Deploy Weather V0.4 to GitHub Pages
+name: Deploy Weather V0.8 MVP to GitHub Pages
 
 on:
   push:

@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowLeft, Download, Maximize2, RotateCcw } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import styles from "./design-system.module.css";
 
@@ -11,7 +12,7 @@ export default function DesignSystemPage() {
     <main className={styles.page}>
       <header className={styles.toolbar}>
         <div className={styles.identity}>
-          <a href="/" aria-label="Back to interactive demo"><ArrowLeft size={20} /></a>
+          <Link href="/" aria-label="Back to interactive demo"><ArrowLeft size={20} /></Link>
           <div><span>WEATHER SYSTEM</span><strong>V0.5 Component Canvas</strong></div>
         </div>
         <div className={styles.actions}>

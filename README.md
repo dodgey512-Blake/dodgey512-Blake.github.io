@@ -1,35 +1,30 @@
-# Weather V0.5 · Weather in Motion
+# Weather V0.8 · MVP V5.2 可执行版
 
-V0.5 是独立的天气状态动效整合版本。V0.4 的源码、公开提交和项目记录继续保留；当前版本把组件库中的 Clear、Rain、Storm 三套天气状态真正接入首页，并修正天气切换控件遮挡动画的问题。
+V0.8 是基于《天气应用 MVP V5.2》的首个完整可执行版本。V0.5 已以 Git tag `v0.5.0` 保留，本版本不覆盖旧版记录。
 
-## 当前交付
+## 可验收主链路
 
-1. 产品入口：`/`
-2. 组件库入口：`/design-system/`
-3. V0.5 独立 SVG：`/weather-design-system-v0.5.svg`
-4. V0.4 独立 SVG：`/weather-design-system-v0.4.svg`
-5. 发布目标：`https://dodgey512-blake.github.io/`
+1. 选择 Austin、New York、Seattle 或 Denver。
+2. 读取美国 National Weather Service 的实时观测、72 小时预报和官方预警。
+3. 在首页切换 Live / Clear / Rain / Storm，检查对应天气动效；Rain 与 Storm 使用闭合 SVG 雨滴，不使用长直线代替。
+4. 查看 OOTD Lite 并记录冷 / 合适 / 热反馈。
+5. 新建未来 72 小时内的一次跑步计划，获得 Keep / Watch / Change 建议。
+6. 接受建议、保留原计划或自行编辑；Demo 只更新本地计划，不伪装成 Calendar、Watch 或支付写入。
+7. 测试天气变化后的重新判断，并提交跑后反馈。
 
-## 三套天气状态
+## 数据与边界
 
-1. Clear：太阳呼吸、光晕旋转、十二段日光射线和三层云漂移。
-2. Rain：低压云层、前后景雨线、风向斜角、横向阵风和落雨波纹。
-3. Storm：重雨、深色云层、加强阵风、低频双闪和独立闪电路径。
-4. 切换天气时，背景、温度、天气标签、体感说明和逐小时预报同步变化。
+- 实时数据：美国 NWS 无密钥公开 API。
+- 降级：NWS 不可用时，明确显示 `DEMO DATA` 与失败提示，不把模拟数据伪装为实时数据。
+- 本地状态：`localStorage`，无账号、无云端个人档案。
+- 旧组件库：`/design-system/` 继续展示 V0.5 动态 SVG 大画布。
 
-## 布局修正
-
-1. `WEATHER`、`AUSTIN` 和三态切换器位于同一顶部栏。
-2. 切换器不再悬浮在天气动画的太阳或云层上方。
-3. 三个按钮保持同一图标规格、44px 触控高度和明确的选中反馈。
-4. 320px 下使用紧凑文字与间距，但不缩小核心触控高度。
-
-## 本地运行
+## 本地验收
 
 ```bash
-npm install
-npm run dev
+npm ci
+npm run lint
 npm test
 ```
 
-天气、日历、手表与个人模型仍为 Demo 数据，没有真实外部写入。
+发布目标：<https://dodgey512-blake.github.io/>

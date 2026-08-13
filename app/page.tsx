@@ -1,279 +1,410 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  AlertTriangle,
+  ArrowLeft,
   ArrowRight,
-  CalendarClock,
+  Bell,
   CalendarDays,
-  CarFront,
   Check,
   CheckCircle2,
-  ChevronLeft,
+  ChevronRight,
   CloudLightning,
   CloudRain,
   CloudSun,
-  Fish,
+  Database,
   Footprints,
-  Layers3,
-  PlaneTakeoff,
+  LocateFixed,
+  MapPin,
+  Pencil,
   Plus,
+  RefreshCw,
+  RotateCcw,
+  Settings2,
   Shirt,
-  Snowflake,
+  Sparkles,
   SunMedium,
+  Trash2,
   UserRound,
+  X,
   type LucideIcon,
 } from "lucide-react";
+import WeatherScene from "./WeatherScene";
+import {
+  LOCATIONS,
+  addLocalDays,
+  displaySnapshot,
+  fallbackWeather,
+  fetchNwsWeather,
+  formatInZone,
+  localDateParts,
+  type HourWeather,
+  type LocationOption,
+  type ScenarioMode,
+  type WeatherCondition,
+  type WeatherSnapshot,
+} from "./weather";
 
-type Screen = "welcome" | "setup" | "home" | "planner" | "storm" | "run" | "feedback" | "modules" | "profile";
-type Scenario = "clear" | "rain" | "storm";
-type Adaptation = "time" | "pace" | "route";
+type Screen = "welcome" | "location" | "home" | "forecast" | "alert" | "outfit" | "plan" | "editor" | "analysis" | "confirm" | "change" | "feedback" | "settings";
+type Decision = "accepted" | "kept" | "edited" | null;
+type PlanStatus = "scheduled" | "completed" | "cancelled";
 
-const modules: Array<{ id: string; label: string; note: string; tier: string; icon: LucideIcon }> = [
-  { id: "everyday", label: "Everyday", note: "What to wear and when to leave", tier: "CORE", icon: Shirt },
-  { id: "commute", label: "Commute", note: "Rain, traffic and walking windows", tier: "CORE", icon: CarFront },
-  { id: "meetings", label: "Meetings", note: "Door-to-door timing for your calendar", tier: "CORE", icon: CalendarClock },
-  { id: "travel", label: "Travel", note: "Weather across the whole trip", tier: "CORE", icon: PlaneTakeoff },
-  { id: "running", label: "Running", note: "Pace, route and heat response", tier: "PRO", icon: Footprints },
-  { id: "fishing", label: "Fishing", note: "Wind, pressure and bite windows", tier: "PRO", icon: Fish },
-  { id: "skiing", label: "Skiing", note: "Snow quality and mountain timing", tier: "PRO", icon: Snowflake },
+type RunPlan = {
+  id: string;
+  type: string;
+  date: string;
+  time: string;
+  duration: number;
+  distance: string;
+  flexibility: number;
+  indoor: boolean;
+  note: string;
+  status: PlanStatus;
+  decision: Decision;
+  originalTime?: string;
+  createdAt: string;
+};
+
+type Feedback = {
+  completed: "yes" | "partial" | "no";
+  feel: "cool" | "right" | "hot";
+  useful: "yes" | "somewhat" | "no";
+  note: string;
+};
+
+type Recommendation = {
+  state: "good" | "watch" | "change";
+  title: string;
+  summary: string;
+  reason: string;
+  originalHour: HourWeather;
+  recommendedHour: HourWeather;
+  recommendedTime: string;
+  improvement: number;
+  score: number;
+  evidence: string[];
+};
+
+const STORAGE_KEY = "weather-mvp-v08";
+const SOURCE_URL = "https://www.weather.gov/documentation/services-web-api";
+
+const screenLabels: Record<Screen, string> = {
+  welcome: "Welcome",
+  location: "Set location",
+  home: "Today",
+  forecast: "72-hour weather",
+  alert: "Official alert",
+  outfit: "OOTD Lite",
+  plan: "My run",
+  editor: "Add a run",
+  analysis: "Weather decision",
+  confirm: "Confirm change",
+  change: "Weather changed",
+  feedback: "Run feedback",
+  settings: "You",
+};
+
+const navItems: Array<{ screen: Screen; label: string; icon: LucideIcon }> = [
+  { screen: "home", label: "Today", icon: CloudSun },
+  { screen: "plan", label: "Plan", icon: CalendarDays },
+  { screen: "settings", label: "You", icon: UserRound },
 ];
 
-const navItems: Array<{ id: Screen; label: string; icon: LucideIcon }> = [
-  { id: "home", label: "Today", icon: CloudSun },
-  { id: "planner", label: "Plan", icon: CalendarDays },
-  { id: "modules", label: "Modules", icon: Layers3 },
-  { id: "profile", label: "You", icon: UserRound },
-];
+function track(name: string, properties: Record<string, unknown> = {}) {
+  try {
+    const previous = JSON.parse(localStorage.getItem(`${STORAGE_KEY}-events`) || "[]");
+    const next = [...previous.slice(-49), { name, properties, at: new Date().toISOString() }];
+    localStorage.setItem(`${STORAGE_KEY}-events`, JSON.stringify(next));
+  } catch {
+    // Analytics remain non-blocking in the static demo.
+  }
+}
 
-function WeatherScene({ scenario, compact = false }: { scenario: Scenario; compact?: boolean }) {
+function pad(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function timeToMinutes(value: string) {
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function minutesToTime(value: number) {
+  const normalized = ((value % 1440) + 1440) % 1440;
+  return `${pad(Math.floor(normalized / 60))}:${pad(normalized % 60)}`;
+}
+
+function displayTime(value: string) {
+  const [hours, minutes] = value.split(":").map(Number);
+  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(2026, 0, 1, hours, minutes));
+}
+
+function displayDate(value: string) {
+  return new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" }).format(new Date(`${value}T12:00:00`));
+}
+
+function scoreHour(hour: HourWeather) {
+  const storm = hour.condition === "storm" ? 70 : 0;
+  const heat = Math.max(0, hour.temperature - 82) * 2.8;
+  const cold = Math.max(0, 34 - hour.temperature) * 1.8;
+  return Math.round(hour.precipitation * 0.55 + hour.windSpeed * 1.2 + heat + cold + storm);
+}
+
+function hourKey(iso: string, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(iso));
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || "00";
+  return {
+    date: `${value("year")}-${value("month")}-${value("day")}`,
+    minutes: Number(value("hour")) * 60 + Number(value("minute")),
+  };
+}
+
+function findRecommendation(plan: RunPlan, snapshot: WeatherSnapshot): Recommendation {
+  const requested = timeToMinutes(plan.time);
+  const candidates = snapshot.hourly.filter((hour) => {
+    const key = hourKey(hour.startTime, snapshot.timeZone);
+    return key.date === plan.date && Math.abs(key.minutes - requested) <= Math.max(plan.flexibility, 60);
+  });
+  const dayHours = snapshot.hourly.filter((hour) => hourKey(hour.startTime, snapshot.timeZone).date === plan.date);
+  const pool = candidates.length ? candidates : dayHours.length ? dayHours : snapshot.hourly;
+  const originalHour = [...pool].sort((a, b) => Math.abs(hourKey(a.startTime, snapshot.timeZone).minutes - requested) - Math.abs(hourKey(b.startTime, snapshot.timeZone).minutes - requested))[0];
+  const eligible = pool.filter((hour) => Math.abs(hourKey(hour.startTime, snapshot.timeZone).minutes - requested) <= plan.flexibility || !plan.flexibility);
+  const recommendationPool = eligible.length ? eligible : [originalHour];
+  const recommendedHour = [...recommendationPool].sort((a, b) => scoreHour(a) - scoreHour(b))[0];
+  const score = scoreHour(originalHour);
+  const improvement = score - scoreHour(recommendedHour);
+  const recommendedMinutes = hourKey(recommendedHour.startTime, snapshot.timeZone).minutes;
+  const recommendedTime = minutesToTime(recommendedMinutes);
+  const hasOfficialAlert = snapshot.alerts.length > 0;
+  const state: Recommendation["state"] = hasOfficialAlert || originalHour.condition === "storm" || (score >= 45 && improvement >= 10 && plan.flexibility > 0)
+    ? "change"
+    : score >= 28
+      ? "watch"
+      : "good";
+  const title = state === "good" ? "Keep the plan." : state === "watch" ? "Keep it, but prepare." : `Move to ${displayTime(recommendedTime)}.`;
+  const summary = state === "good"
+    ? "No material weather conflict appears during this run."
+    : state === "watch"
+      ? "Conditions are noticeable, but no clearly better time appears inside your window."
+      : hasOfficialAlert
+        ? "An active official alert takes priority over the normal recommendation."
+        : "A lower-impact weather window appears inside the time range you allowed.";
+  const reason = hasOfficialAlert
+    ? `${snapshot.alerts[0].event} is active for this area.`
+    : originalHour.condition === "storm"
+      ? "Thunderstorm conditions overlap the original run."
+      : originalHour.precipitation >= 50
+        ? `${originalHour.precipitation}% precipitation overlaps the original run.`
+        : originalHour.temperature >= 83
+          ? `${originalHour.temperature}°F overlaps the original run.`
+          : `${originalHour.windSpeed} mph wind is the main condition to watch.`;
+  return {
+    state,
+    title,
+    summary,
+    reason,
+    originalHour,
+    recommendedHour,
+    recommendedTime,
+    improvement,
+    score,
+    evidence: [
+      `${originalHour.temperature}°F temperature`,
+      `${originalHour.precipitation}% precipitation`,
+      `${originalHour.windSpeed} mph wind`,
+    ],
+  };
+}
+
+function conditionIcon(condition: WeatherCondition, size = 22) {
+  if (condition === "storm") return <CloudLightning size={size} strokeWidth={1.8} />;
+  if (condition === "rain") return <CloudRain size={size} strokeWidth={1.8} />;
+  if (condition === "cloud") return <CloudSun size={size} strokeWidth={1.8} />;
+  return <SunMedium size={size} strokeWidth={1.8} />;
+}
+
+function SourceChip({ weather }: { weather: WeatherSnapshot }) {
   return (
-    <div className={`weather-scene weather-${scenario} ${compact ? "is-compact" : ""}`} data-weather-motion={scenario} aria-hidden="true">
-      <div className="weather-color-wash" />
-      <div className="sun-disc"><span className="sun-rays">{Array.from({ length: 12 }, (_, index) => <i key={`ray-${index}`} style={{ "--ray": index } as React.CSSProperties} />)}</span></div>
-      <div className="cloud cloud-a"><i /><i /><i /></div>
-      <div className="cloud cloud-b"><i /><i /><i /></div>
-      <div className="cloud cloud-c"><i /><i /><i /></div>
-      <div className="storm-cloud storm-cloud-a"><i /><i /><i /></div>
-      <div className="storm-cloud storm-cloud-b"><i /><i /><i /></div>
-      <div className="rain-field rain-back">
-        {Array.from({ length: 14 }, (_, index) => <i key={`back-${index}`} style={{ "--i": index } as React.CSSProperties} />)}
-      </div>
-      <div className="rain-field rain-front">
-        {Array.from({ length: 18 }, (_, index) => <i key={`front-${index}`} style={{ "--i": index } as React.CSSProperties} />)}
-      </div>
-      <div className="wind-streaks">{Array.from({ length: 7 }, (_, index) => <i key={`wind-${index}`} style={{ "--wind": index } as React.CSSProperties} />)}</div>
-      <div className="rain-ripples">{Array.from({ length: 5 }, (_, index) => <i key={`ripple-${index}`} style={{ "--ripple": index } as React.CSSProperties} />)}</div>
-      <svg className="lightning-bolt" viewBox="0 0 90 150" role="presentation"><path d="M55 3 17 82h31l-13 65 42-86H48L55 3Z" /></svg>
-      <div className="storm-flash" />
-      <div className="horizon" />
-    </div>
+    <a className={`source-chip is-${weather.state}`} href={SOURCE_URL} target="_blank" rel="noreferrer">
+      <i /> {weather.state === "live" ? "NWS LIVE" : "DEMO DATA"}
+    </a>
   );
 }
 
-function AppHeader({ eyebrow, badge, onBack }: { eyebrow: string; badge?: string; onBack?: () => void }) {
+function TopBar({ title, onBack, action }: { title: string; onBack?: () => void; action?: ReactNode }) {
   return (
-    <header className="app-header">
-      <div className="header-title">
-        {onBack && <button className="icon-button" onClick={onBack} aria-label="Go back"><ChevronLeft size={24} strokeWidth={2} /></button>}
-        <span>{eyebrow}</span>
+    <header className="top-bar">
+      <div className="top-bar-title">
+        {onBack && <button className="icon-button" onClick={onBack} aria-label="Go back"><ArrowLeft size={21} /></button>}
+        <span>{title}</span>
       </div>
-      {badge && <span className="header-badge">{badge}</span>}
+      {action}
     </header>
   );
 }
 
-function WeatherHeader({ scenario, setScenario }: { scenario: Scenario; setScenario: (scenario: Scenario) => void }) {
-  const options: Array<{ value: Scenario; label: string; icon: LucideIcon }> = [
-    { value: "clear", label: "clear weather", icon: SunMedium },
-    { value: "rain", label: "rain weather", icon: CloudRain },
-    { value: "storm", label: "storm weather", icon: CloudLightning },
-  ];
-  return (
-    <header className="weather-topbar">
-      <span className="weather-wordmark">WEATHER</span>
-      <div className="weather-topbar-actions">
-        <span className="weather-location">AUSTIN</span>
-        <div className="condition-switch" aria-label="Preview weather motion">
-          {options.map((option) => (
-            <button
-              key={option.value}
-              className={scenario === option.value ? "is-active" : ""}
-              onClick={() => setScenario(option.value)}
-              aria-label={`Preview ${option.label}`}
-              aria-pressed={scenario === option.value}
-            >
-              <option.icon size={18} strokeWidth={1.8} />
-            </button>
-          ))}
-        </div>
-      </div>
-    </header>
-  );
-}
-
-function BottomNav({ screen, go }: { screen: Screen; go: (screen: Screen) => void }) {
+function BottomNav({ screen, go }: { screen: Screen; go: (value: Screen) => void }) {
+  const active = screen === "home" || screen === "forecast" || screen === "outfit" || screen === "alert" ? "home" : screen === "settings" ? "settings" : "plan";
   return (
     <nav className="bottom-nav" aria-label="Primary navigation">
-      {navItems.map((item) => (
-        <button key={item.id} className={screen === item.id ? "is-active" : ""} onClick={() => go(item.id)}>
-          <span className="nav-icon" aria-hidden="true"><item.icon size={22} strokeWidth={1.8} /></span>
-          <span className="nav-label">{item.label}</span>
-        </button>
-      ))}
+      {navItems.map((item) => {
+        const Icon = item.icon;
+        return (
+          <button key={item.screen} className={active === item.screen ? "is-active" : ""} onClick={() => go(item.screen)}>
+            <span><Icon size={22} strokeWidth={1.8} /></span><small>{item.label}</small>
+          </button>
+        );
+      })}
     </nav>
   );
+}
+
+function PhoneStatus() {
+  return <div className="phone-status"><span>9:41</span><i /><b /></div>;
 }
 
 function Welcome({ onStart, onPreview }: { onStart: () => void; onPreview: () => void }) {
   return (
     <section className="screen welcome-screen" data-screen="welcome">
-      <WeatherScene scenario="clear" />
-      <div className="welcome-top">
-        <span className="wordmark">WEATHER</span>
-        <span className="demo-label">INTERACTIVE DEMO</span>
-      </div>
+      <WeatherScene condition="clear" />
+      <div className="welcome-top"><strong>WEATHER</strong><span>MVP · V0.8</span></div>
       <div className="welcome-copy">
-        <p className="kicker">WEATHER, MADE PERSONAL</p>
-        <h1>Know the sky.<br />Plan your day.</h1>
-        <p>Forecasts that understand your calendar, your routines and the activities you care about.</p>
+        <p className="kicker">WEATHER FOR THE DECISION</p>
+        <h1>Know when<br />to run.</h1>
+        <p>Live U.S. weather, translated into one clear decision for your next run.</p>
       </div>
       <div className="welcome-actions">
-        <button className="primary-button" onClick={onStart}>Build my weather <ArrowRight className="action-icon" size={20} aria-hidden="true" /></button>
-        <button className="text-button" onClick={onPreview}>Preview today first</button>
+        <button className="primary-button" onClick={onStart}>Set my location <ArrowRight size={20} /></button>
+        <button className="quiet-button" onClick={onPreview}>Open Austin demo</button>
       </div>
     </section>
   );
 }
 
-function Setup({ selected, setSelected, onComplete, onBack }: {
-  selected: string[];
-  setSelected: (value: string[]) => void;
-  onComplete: () => void;
-  onBack: () => void;
-}) {
-  const [step, setStep] = useState(0);
-  const toggle = (id: string) => setSelected(selected.includes(id) ? selected.filter((item) => item !== id) : [...selected, id]);
+function LocationScreen({ selected, choose, onBack }: { selected: LocationOption; choose: (value: LocationOption) => void; onBack: () => void }) {
+  const [query, setQuery] = useState("");
+  const visible = LOCATIONS.filter((location) => `${location.name} ${location.region}`.toLowerCase().includes(query.toLowerCase()));
   return (
-    <section className="screen setup-screen" data-screen="setup">
-      <AppHeader eyebrow="SET UP YOUR WEATHER" badge={`${step + 1} / 2`} onBack={step === 0 ? onBack : () => setStep(0)} />
-      <div className="setup-progress"><i style={{ width: step === 0 ? "50%" : "100%" }} /></div>
-      {step === 0 ? (
-        <>
-          <div className="setup-scroll">
-            <div className="screen-body setup-body">
-              <p className="kicker">WHAT SHAPES YOUR DAY?</p>
-              <h2>Choose what weather should understand.</h2>
-              <p className="body-copy">Start broad. Professional modules add deeper advice only when you want it.</p>
-              <div className="module-grid">
-                {modules.map((module) => {
-                  const ModuleIcon = module.icon;
-                  const isSelected = selected.includes(module.id);
-                  return (
-                    <button key={module.id} className={`module-choice ${isSelected ? "is-selected" : ""}`} onClick={() => toggle(module.id)} aria-pressed={isSelected}>
-                      <span className="module-topline"><ModuleIcon size={22} strokeWidth={1.8} /><i>{isSelected ? <Check size={16} strokeWidth={2.5} /> : <Plus size={16} strokeWidth={2} />}</i></span>
-                      <span className="module-tier">{module.tier}</span>
-                      <strong>{module.label}</strong>
-                      <small>{module.note}</small>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-          <footer className="action-dock"><button className="primary-button" disabled={selected.length === 0} onClick={() => setStep(1)}>Continue <ArrowRight className="action-icon" size={20} aria-hidden="true" /></button></footer>
-        </>
-      ) : (
-        <>
-          <div className="setup-scroll">
-            <div className="screen-body setup-body connect-step">
-              <p className="kicker">CONNECT THE DAY</p>
-              <h2>Give weather enough context to be useful.</h2>
-              <div className="connection-card">
-                <div><span className="connection-mark">AUS</span><div><strong>Austin, Texas</strong><small>Primary location · Demo conditions</small></div></div>
-                <button className="mini-button">Change</button>
-              </div>
-              <label className="toggle-row">
-                <span><strong>Calendar</strong><small>Read event time and travel window</small></span>
-                <input type="checkbox" defaultChecked /><i />
-              </label>
-              <label className="toggle-row">
-                <span><strong>Notifications</strong><small>Only when weather changes a plan</small></span>
-                <input type="checkbox" defaultChecked /><i />
-              </label>
-              <label className="toggle-row">
-                <span><strong>Apple Watch</strong><small>Send approved activity changes</small></span>
-                <input type="checkbox" defaultChecked={selected.includes("running")} /><i />
-              </label>
-              <div className="privacy-note"><strong>Your context stays yours.</strong><span>This demo stores choices only in this browser.</span></div>
-            </div>
-          </div>
-          <footer className="action-dock"><button className="primary-button" onClick={onComplete}>Show my day <ArrowRight className="action-icon" size={20} aria-hidden="true" /></button></footer>
-        </>
-      )}
+    <section className="screen fixed-screen" data-screen="location">
+      <TopBar title="SET LOCATION" onBack={onBack} action={<span className="step-chip">1 / 1</span>} />
+      <div className="fixed-scroll location-body">
+        <p className="kicker">YOUR WEATHER STARTS HERE</p>
+        <h1>Choose a U.S. city.</h1>
+        <p className="body-copy">This public Demo reads National Weather Service data without putting a private API key in the browser.</p>
+        <label className="search-field"><MapPin size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search available cities" /></label>
+        <div className="location-list">
+          {visible.map((location) => (
+            <button key={location.id} className={selected.id === location.id ? "is-selected" : ""} onClick={() => choose(location)}>
+              <span className="location-icon"><LocateFixed size={20} /></span>
+              <span><strong>{location.name}</strong><small>{location.region}</small></span>
+              {selected.id === location.id ? <Check size={20} /> : <ChevronRight size={20} />}
+            </button>
+          ))}
+          {!visible.length && <div className="empty-inline">No city in this Demo set. Try Austin, New York, Seattle or Denver.</div>}
+        </div>
+        <div className="data-note"><Database size={18} /><span><strong>Live source</strong><small>NWS forecasts, observations and official alerts. A dated fallback appears if the service is unavailable.</small></span></div>
+      </div>
+      <footer className="action-dock"><button className="primary-button" onClick={() => choose(selected)}>Use {selected.name} <ArrowRight size={20} /></button></footer>
     </section>
   );
 }
 
-function HomeScreen({ scenario, setScenario, go, selected, saved }: {
-  scenario: Scenario;
-  setScenario: (scenario: Scenario) => void;
-  go: (screen: Screen) => void;
-  selected: string[];
-  saved: boolean;
-}) {
-  const conditions: Record<Scenario, { temp: string; label: string; high: string; low: string; note: string; hours: string[][] }> = {
-    clear: {
-      temp: "68°", label: "SUNNY", high: "78°", low: "59°", note: "Clear through 4 PM",
-      hours: [["NOW", "68°", "CLEAR"], ["11 AM", "71°", "CLEAR"], ["1 PM", "75°", "CLEAR"], ["4 PM", "74°", "CLOUD"], ["6 PM", "66°", "RAIN 24%"]],
-    },
-    rain: {
-      temp: "64°", label: "RAIN", high: "70°", low: "58°", note: "Steady rain · Southwest wind 9 mph",
-      hours: [["NOW", "64°", "RAIN"], ["11 AM", "65°", "RAIN"], ["1 PM", "67°", "LIGHT"], ["4 PM", "66°", "HEAVY"], ["6 PM", "63°", "RAIN 78%"]],
-    },
-    storm: {
-      temp: "62°", label: "STORMS", high: "68°", low: "57°", note: "Thunder risk · Gusts reach 24 mph",
-      hours: [["NOW", "62°", "STORM"], ["11 AM", "63°", "RAIN"], ["1 PM", "65°", "RAIN"], ["4 PM", "64°", "STORM"], ["6 PM", "61°", "RAIN 91%"]],
-    },
-  };
-  const condition = conditions[scenario];
+function ConditionSwitch({ mode, setMode }: { mode: ScenarioMode; setMode: (mode: ScenarioMode) => void }) {
+  const items: Array<{ mode: ScenarioMode; label: string; icon: LucideIcon }> = [
+    { mode: "live", label: "Live weather", icon: LocateFixed },
+    { mode: "clear", label: "Preview clear", icon: SunMedium },
+    { mode: "rain", label: "Preview rain", icon: CloudRain },
+    { mode: "storm", label: "Preview storm", icon: CloudLightning },
+  ];
   return (
-    <section className="screen app-screen home-screen" data-screen="home">
-      <div className="app-scroll-region">
-        <div className={`home-hero home-hero-${scenario}`} data-weather-state={scenario}>
-          <WeatherScene scenario={scenario} />
-          <WeatherHeader scenario={scenario} setScenario={setScenario} />
-          <div className="hero-content">
-            <div className="hero-meta"><span>THU · JUL 23</span></div>
-            <div className="hero-weather-copy" key={scenario}>
-              <div className="temperature-row"><strong>{condition.temp}</strong><div><span>{condition.label}</span><small>H {condition.high} · L {condition.low}</small></div></div>
-              <p>{condition.note}</p>
-            </div>
+    <div className="condition-switch" aria-label="Weather state">
+      {items.map((item) => {
+        const Icon = item.icon;
+        return <button key={item.mode} className={mode === item.mode ? "is-active" : ""} aria-label={item.label} aria-pressed={mode === item.mode} onClick={() => setMode(item.mode)}><Icon size={17} strokeWidth={1.8} /></button>;
+      })}
+    </div>
+  );
+}
+
+function HomeScreen({ weather, mode, setMode, plan, recommendation, go, refresh }: {
+  weather: WeatherSnapshot;
+  mode: ScenarioMode;
+  setMode: (mode: ScenarioMode) => void;
+  plan: RunPlan | null;
+  recommendation: Recommendation | null;
+  go: (value: Screen) => void;
+  refresh: () => void;
+}) {
+  const nowLabel = formatInZone(weather.updatedAt, weather.timeZone, { hour: "numeric", minute: "2-digit" });
+  const outfit = weather.temperature >= 78 ? "Light layer + sun protection" : weather.temperature <= 50 ? "Warm layer + wind shell" : weather.condition === "rain" ? "Waterproof shell + grippy shoes" : "Light layer for the temperature shift";
+  return (
+    <section className="screen app-screen" data-screen="home">
+      <div className="app-scroll">
+        <div className={`weather-hero hero-${weather.condition}`}>
+          <WeatherScene condition={weather.condition} />
+          <header className="weather-top-row">
+            <button className="location-button" onClick={() => go("location")}><span>{weather.location.name.toUpperCase()}</span><MapPin size={15} /></button>
+            <ConditionSwitch mode={mode} setMode={setMode} />
+          </header>
+          <div className="weather-identity"><SourceChip weather={weather} /><span>UPDATED {nowLabel.toUpperCase()}</span></div>
+          <div className="weather-primary">
+            <strong>{weather.temperature}°</strong>
+            <div><span>{weather.text.toUpperCase()}</span><small>H {weather.high}° · L {weather.low}°</small></div>
           </div>
-          <div className="hourly-strip" aria-label="Hourly forecast">
-            {condition.hours.map((hour) => (
-              <button key={hour[0]} onClick={() => (hour[0] === "6 PM" || hour[2] === "STORM") && go("storm")}><small>{hour[0]}</small><b>{hour[1]}</b><span>{hour[2]}</span></button>
+          <p className="weather-summary">Feels {weather.feelsLike}° · Wind {weather.windDirection} {weather.windSpeed} mph{weather.humidity !== null ? ` · Humidity ${weather.humidity}%` : ""}</p>
+          <div className="hourly-strip">
+            {weather.hourly.slice(0, 6).map((hour, index) => (
+              <button key={hour.startTime} onClick={() => go("forecast")}>
+                <small>{index === 0 ? "NOW" : formatInZone(hour.startTime, weather.timeZone, { hour: "numeric" })}</small>
+                <span>{conditionIcon(hour.condition, 18)}</span>
+                <b>{hour.temperature}°</b>
+                <i>{hour.precipitation}%</i>
+              </button>
             ))}
           </div>
         </div>
-        <main className="screen-body home-body">
-        {saved && <button className="success-banner" onClick={() => go("planner")}><span>✓</span><div><strong>Run updated</strong><small>5:40 PM · West Loop · Calendar + Watch</small></div><i>→</i></button>}
-        <div className="section-heading"><div><p className="kicker">YOUR DAY</p><h2>Weather, in context.</h2></div><button className="mini-button" onClick={() => go("planner")}>Full plan</button></div>
-        <button className="impact-card meeting-card" onClick={() => go("planner")}>
-          <span className="impact-time">2:00</span>
-          <div><small>CLIENT MEETING · DOWNTOWN</small><strong>Leave 12 minutes earlier.</strong><p>A short shower may slow the walk from parking.</p></div>
-          <i>→</i>
-        </button>
-        {selected.includes("running") && (
-          <button className="impact-card run-card" onClick={() => go("run")}>
-            <span className="impact-time">6:30</span>
-            <div><small>RUNNING PRO · TEMPO 10 MI</small><strong>{saved ? "Your adjusted plan is ready." : "Thunder overlaps miles 4–8."}</strong><p>{saved ? "Tap to review the change." : "A safer window starts at 5:40 PM."}</p></div>
-            <i>→</i>
+        <main className="home-content">
+          {mode !== "live" && <div className="preview-note"><Sparkles size={16} /><span><strong>Scenario preview</strong><small>This state changes motion, forecast and run advice. It is not live weather.</small></span><button onClick={() => setMode("live")}><X size={17} /></button></div>}
+          {weather.issue && <button className="source-warning" onClick={refresh}><AlertTriangle size={18} /><span><strong>Live source unavailable</strong><small>Showing dated Demo data · Tap to retry NWS</small></span><RefreshCw size={17} /></button>}
+          {weather.alerts.length > 0 && (
+            <button className="alert-banner" onClick={() => go("alert")}>
+              <AlertTriangle size={20} /><span><small>NWS OFFICIAL ALERT</small><strong>{weather.alerts[0].event}</strong></span><ChevronRight size={19} />
+            </button>
+          )}
+          <div className="section-title"><div><p className="kicker">YOUR DAY</p><h2>Weather, in context.</h2></div><button onClick={() => go("forecast")}>72 hours</button></div>
+          <button className={`run-card ${recommendation ? `is-${recommendation.state}` : ""}`} onClick={() => go(plan ? "analysis" : "editor")}>
+            <span className="run-time">{plan ? displayTime(plan.time) : <Plus size={21} />}</span>
+            <span className="run-card-copy">
+              <small>{plan ? `${plan.type.toUpperCase()} · ${displayDate(plan.date).toUpperCase()}` : "RUNNING PRO"}</small>
+              <strong>{recommendation ? recommendation.title : "Add your next run."}</strong>
+              <i>{recommendation ? recommendation.reason : "Weather advice starts with a real plan."}</i>
+            </span>
+            <ChevronRight size={21} />
           </button>
-        )}
-        <button className="weather-alert-card" onClick={() => go("storm")}>
-          <div className="radar-mini"><i /><i /><i /></div>
-          <div><small>WEATHER DETAIL</small><strong>{scenario === "clear" ? "Rain arrives after the best outdoor window." : "Storm line moving east across Austin."}</strong><span>See timing, wind and plan impact →</span></div>
-        </button>
+          <div className="home-grid">
+            <button className="outfit-card" onClick={() => go("outfit")}>
+              <span className="card-art"><Shirt size={25} /></span>
+              <small>OOTD LITE · FREE</small>
+              <strong>{outfit}</strong>
+              <i>Why this outfit <ArrowRight size={14} /></i>
+            </button>
+            <button className="weather-card" onClick={() => go("forecast")}>
+              <span className="card-art">{conditionIcon(weather.condition, 25)}</span>
+              <small>72-HOUR WEATHER</small>
+              <strong>{weather.daily[0]?.shortForecast || weather.text}</strong>
+              <i>Open details <ArrowRight size={14} /></i>
+            </button>
+          </div>
+          <p className="source-foot">Weather source: National Weather Service · {weather.stationName} · Observation {formatInZone(weather.observationTime, weather.timeZone, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</p>
         </main>
       </div>
       <BottomNav screen="home" go={go} />
@@ -281,228 +412,348 @@ function HomeScreen({ scenario, setScenario, go, selected, saved }: {
   );
 }
 
-function Planner({ go, saved }: { go: (screen: Screen) => void; saved: boolean }) {
+function ForecastScreen({ weather, go }: { weather: WeatherSnapshot; go: (value: Screen) => void }) {
   return (
-    <section className="screen app-screen" data-screen="planner">
-      <AppHeader eyebrow="YOUR DAY" badge="THU 23" />
-      <main className="screen-body planner-body">
-        <p className="kicker">WEATHER-AWARE PLAN</p>
-        <h1>Three moments need your attention.</h1>
-        <div className="day-window"><span>9 AM</span><i className="good" /><i className="good" /><i className="cloudy" /><i className="rainy" /><i className="stormy" /><span>9 PM</span></div>
-        <div className="timeline">
-          <article className="timeline-item is-good"><time>8:30</time><div><small>COMMUTE</small><strong>Normal route works.</strong><p>63° · Dry · Light south wind</p></div><span>GOOD</span></article>
-          <button className="timeline-item is-watch" onClick={() => go("storm")}><time>2:00</time><div><small>CLIENT MEETING</small><strong>Leave by 1:28 PM.</strong><p>12-minute rain buffer included</p></div><span>WATCH</span></button>
-          <button className="timeline-item is-change" onClick={() => go("run")}><time>{saved ? "5:40" : "6:30"}</time><div><small>TEMPO · 10 MI</small><strong>{saved ? "Adjusted plan applied." : "Move earlier or run indoors."}</strong><p>{saved ? "West Loop · 7:55 /mi" : "Thunder risk rises during miles 4–8"}</p></div><span>{saved ? "SET" : "CHANGE"}</span></button>
+    <section className="screen detail-screen" data-screen="forecast">
+      <TopBar title="72-HOUR WEATHER" onBack={() => go("home")} action={<SourceChip weather={weather} />} />
+      <div className="detail-scroll forecast-body">
+        <div className="forecast-lead"><span>{conditionIcon(weather.condition, 30)}</span><div><small>{weather.location.name.toUpperCase()}</small><h1>{weather.text}</h1><p>Updated {formatInZone(weather.updatedAt, weather.timeZone, { hour: "numeric", minute: "2-digit" })}</p></div></div>
+        <p className="kicker">NEXT 24 HOURS</p>
+        <div className="hour-list">
+          {weather.hourly.slice(0, 24).map((hour, index) => (
+            <div key={hour.startTime}>
+              <time>{index === 0 ? "Now" : formatInZone(hour.startTime, weather.timeZone, { hour: "numeric" })}</time>
+              <span>{conditionIcon(hour.condition, 20)}<small>{hour.shortForecast}</small></span>
+              <b>{hour.temperature}°</b><i>{hour.precipitation}%</i><em>{hour.windSpeed} mph</em>
+            </div>
+          ))}
         </div>
-        <div className="quiet-card"><small>TOMORROW</small><strong>No plan conflicts yet.</strong><p>We will only interrupt when weather materially changes what you planned.</p></div>
-      </main>
-      <BottomNav screen="planner" go={go} />
-    </section>
-  );
-}
-
-function StormDetail({ go, scenario, setScenario }: { go: (screen: Screen) => void; scenario: Scenario; setScenario: (value: Scenario) => void }) {
-  const [hour, setHour] = useState(6);
-  const angle = hour < 6 ? -8 : hour === 6 ? -14 : -20;
-  const intensity = hour < 6 ? "LIGHT" : hour === 6 ? "HEAVY" : "SEVERE";
-  return (
-    <section className="screen storm-screen" data-screen="storm" style={{ "--rain-angle": `${angle}deg` } as React.CSSProperties}>
-      <WeatherScene scenario={scenario === "clear" ? "rain" : scenario} />
-      <AppHeader eyebrow="WEATHER DETAIL" badge="AUSTIN" onBack={() => go("home")} />
-      <div className="storm-scroll">
-        <div className="storm-headline"><p className="kicker">THUNDERSTORM WINDOW</p><h1>Rain turns hard<br />after 6 PM.</h1><p>Wind shifts southwest and changes the rain angle across the lake.</p></div>
-        <div className="storm-controls">
-          {[4, 5, 6, 7, 8].map((value) => <button key={value} className={hour === value ? "is-active" : ""} onClick={() => { setHour(value); setScenario(value < 5 ? "rain" : "storm"); }}><span>{value} PM</span><b>{value < 6 ? "24%" : value === 6 ? "78%" : "91%"}</b></button>)}
+        <p className="kicker forecast-kicker">THREE-DAY WINDOW</p>
+        <div className="daily-list">
+          {weather.daily.map((day) => <div key={day.name}><strong>{day.name}</strong><span>{conditionIcon(day.condition, 20)} {day.shortForecast}</span><b>{day.temperature}°</b><small>{day.precipitation}%</small></div>)}
         </div>
-        <main className="storm-sheet">
-          <div className="storm-metrics">
-            <div><small>INTENSITY</small><strong>{intensity}</strong></div>
-            <div><small>WIND</small><strong>{hour < 6 ? "9" : "18"} MPH</strong></div>
-            <div><small>RAIN ANGLE</small><strong>{Math.abs(angle)}° SW</strong></div>
-          </div>
-          <div className="radar-card">
-            <div className="radar-map"><i className="ring r1" /><i className="ring r2" /><i className="ring r3" /><i className="sweep" /><span>AUS</span></div>
-            <div><small>NEXT 90 MIN</small><strong>Storm line crosses your evening route.</strong><p>The strongest cell reaches Lady Bird Lake around 6:52 PM.</p></div>
-          </div>
-          <button className="primary-button storm-cta" onClick={() => go("run")}>See impact on my run <ArrowRight className="action-icon" size={20} aria-hidden="true" /></button>
-        </main>
+        <div className="data-source-card"><Database size={20} /><span><strong>{weather.state === "live" ? "Live NWS data" : "Dated fallback data"}</strong><small>Forecasts are probabilistic. Severe-weather decisions should follow the issuing government authority.</small></span></div>
       </div>
     </section>
   );
 }
 
-function RunningPro({ go, choice, setChoice, saved, apply }: {
-  go: (screen: Screen) => void;
-  choice: Adaptation | null;
-  setChoice: (value: Adaptation) => void;
-  saved: boolean;
-  apply: () => void;
+function AlertScreen({ weather, go }: { weather: WeatherSnapshot; go: (value: Screen) => void }) {
+  const alert = weather.alerts[0];
+  return (
+    <section className="screen detail-screen alert-screen" data-screen="alert">
+      <TopBar title="NWS OFFICIAL ALERT" onBack={() => go("home")} />
+      <div className="detail-scroll alert-body">
+        {alert ? <>
+          <span className="severity-chip">{alert.severity.toUpperCase()} · {alert.urgency.toUpperCase()}</span>
+          <h1>{alert.event}</h1><p className="alert-headline">{alert.headline}</p>
+          <div className="alert-facts"><div><small>AREA</small><strong>{alert.area}</strong></div><div><small>EXPIRES</small><strong>{formatInZone(alert.expires, weather.timeZone, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</strong></div></div>
+          <h2>Official instruction</h2><p>{alert.instruction}</p>
+          <h2>Details</h2><p className="pre-line">{alert.description}</p>
+          <a className="primary-button" href={alert.id} target="_blank" rel="noreferrer">Open the issuing alert <ArrowRight size={19} /></a>
+        </> : <div className="empty-state"><CheckCircle2 size={32} /><h1>No active official alert.</h1><p>The scenario preview can show storm motion, but it never creates a fake government alert.</p><button className="primary-button" onClick={() => go("home")}>Back to weather</button></div>}
+      </div>
+    </section>
+  );
+}
+
+function OutfitScreen({ weather, go }: { weather: WeatherSnapshot; go: (value: Screen) => void }) {
+  const [feedback, setFeedback] = useState<"cold" | "right" | "hot" | null>(null);
+  const layers = weather.temperature >= 78 ? "One light layer" : weather.temperature <= 50 ? "Two warm layers" : "One layer + a light shell";
+  const footwear = weather.condition === "rain" || weather.condition === "storm" ? "Water-resistant, grippy shoes" : "Breathable everyday shoes";
+  return (
+    <section className="screen detail-screen" data-screen="outfit">
+      <TopBar title="OOTD LITE" onBack={() => go("home")} action={<span className="free-chip">FREE</span>} />
+      <div className="detail-scroll outfit-body">
+        <div className="outfit-hero"><WeatherScene condition={weather.condition} compact /><span><Shirt size={34} /></span><small>{weather.location.name.toUpperCase()} · TODAY</small><h1>{layers}.</h1><p>Built from {weather.temperature}°F, {weather.windSpeed} mph wind and {weather.hourly[0]?.precipitation || 0}% near-term precipitation.</p></div>
+        <div className="outfit-items"><div><span>01</span><strong>{layers}</strong><small>Adjust once through the day</small></div><div><span>02</span><strong>{footwear}</strong><small>Based on surface and rain conditions</small></div><div><span>03</span><strong>{weather.temperature >= 72 ? "Sun protection" : "Light wind protection"}</strong><small>Bring only what changes the day</small></div></div>
+        <div className="feedback-prompt"><small>HOW DID THIS FEEL?</small><strong>Help tune your comfort level.</strong><div>{(["cold", "right", "hot"] as const).map((value) => <button key={value} className={feedback === value ? "is-active" : ""} onClick={() => { setFeedback(value); track("ootd_feedback", { value }); }}>{value === "cold" ? "Too cold" : value === "right" ? "Just right" : "Too hot"}</button>)}</div>{feedback && <p><Check size={16} /> Saved in this browser.</p>}</div>
+      </div>
+    </section>
+  );
+}
+
+function PlanScreen({ weather, plan, recommendation, feedback, go, removePlan }: {
+  weather: WeatherSnapshot;
+  plan: RunPlan | null;
+  recommendation: Recommendation | null;
+  feedback: Feedback | null;
+  go: (value: Screen) => void;
+  removePlan: () => void;
 }) {
   return (
-    <section className="screen pro-screen" data-screen="run">
-      <AppHeader eyebrow="WEATHER · MODULE" badge="RUNNING PRO" onBack={() => go("home")} />
-      <main className="screen-body pro-body">
-        <p className="kicker">TODAY&apos;S PLAN</p>
-        <h1>TEMPO · 10 MI</h1>
-        <p className="subhead">6:30 PM · Lady Bird Lake <span>DEMO</span></p>
-        <article className="decision-card">
-          <span className="conflict-pill">● &nbsp;PLAN CONFLICT</span>
-          <h2>{saved ? "PLAN UPDATED" : "MOVE TO 5:40 PM"}</h2>
-          <strong>{saved ? "Calendar and Watch are in sync" : "Or keep 6:30 PM and run indoors"}</strong>
-          <div><span>{saved ? "Safer window selected before the storm" : "Thunder risk rises during miles 4–8"}</span><b>86% CONF.</b></div>
-        </article>
-        <article className="why-card">
-          <div className="why-title"><strong>WHY THIS CHANGED</strong><span>WEATHER × PLAN × YOU</span></div>
-          <div className="risk-curve"><i className="best-dot" /><i className="storm-dot" /><span className="curve-line" /></div>
-          <div className="curve-times"><span>4:30</span><span>5:30</span><span>6:30</span><span>7:30</span><span>8:30</span></div>
-          <div className="curve-key"><span><i className="best-key" /> BEST WINDOW</span><span><i className="risk-key" /> THUNDER</span></div>
-        </article>
-        <p className="kicker adaptation-label">CHOOSE AN ADAPTATION</p>
-        <div className="adaptation-grid">
-          <button className={choice === "time" ? "is-selected" : ""} onClick={() => setChoice("time")}><small>TIME</small><strong className="adapt-value">5:40 PM</strong><span>−50 MIN</span></button>
-          <button className={choice === "pace" ? "is-selected" : ""} onClick={() => setChoice("pace")}><small>PACE</small><strong className="adapt-value">8:15 /MI</strong><span>−20 SEC</span></button>
-          <button className={choice === "route" ? "is-selected" : ""} onClick={() => setChoice("route")}><small>ROUTE</small><strong className="adapt-value route-value">WEST LOOP</strong><span>EXIT NEARBY</span></button>
-        </div>
-        <button className={`primary-button apply-button ${saved ? "is-done" : ""}`} disabled={!choice && !saved} onClick={saved ? () => go("planner") : apply}>{saved ? "VIEW UPDATED PLAN" : "APPLY TO CALENDAR & WATCH"}<span>{saved ? "✓" : "→"}</span></button>
-        <button className="personal-card" onClick={() => go("feedback")}><div><strong>PERSONAL RESPONSE</strong><small>Heat tolerance updated after 4 similar runs</small></div><span>→</span></button>
-      </main>
+    <section className="screen app-screen" data-screen="plan">
+      <TopBar title="MY RUN" action={<button className="icon-button" onClick={() => go("editor")} aria-label="Add run"><Plus size={21} /></button>} />
+      <div className="app-scroll plan-body">
+        <p className="kicker">NEXT 72 HOURS</p><h1>One real plan.<br />One clear decision.</h1>
+        {!plan ? <div className="empty-plan"><span><Footprints size={30} /></span><h2>Add the run you already intend to do.</h2><p>The Demo does not generate a training program. It only checks one existing plan against the weather.</p><button className="primary-button" onClick={() => go("editor")}>Add a run <ArrowRight size={20} /></button></div> : <>
+          <div className="plan-card">
+            <div className="plan-card-head"><span><Footprints size={24} /></span><div><small>{plan.type.toUpperCase()}</small><strong>{displayDate(plan.date)} · {displayTime(plan.time)}</strong><p>{plan.duration} min{plan.distance ? ` · ${plan.distance} mi` : ""} · {weather.location.name}</p></div></div>
+            <div className={`decision-summary is-${recommendation?.state}`}><small>{plan.decision ? `DECISION · ${plan.decision.toUpperCase()}` : "WEATHER DECISION"}</small><strong>{plan.decision === "accepted" ? `Moved to ${displayTime(plan.time)}.` : recommendation?.title}</strong><p>{plan.decision === "accepted" && plan.originalTime ? `Accepted from ${displayTime(plan.originalTime)}. Re-check to see the current conditions.` : recommendation?.reason}</p><button onClick={() => go("analysis")}>Open decision <ChevronRight size={18} /></button></div>
+            <div className="plan-actions"><button onClick={() => go("editor")}><Pencil size={17} /> Edit</button><button onClick={() => go("change")}><CloudLightning size={17} /> Test change</button><button onClick={removePlan}><Trash2 size={17} /> Delete</button></div>
+          </div>
+          <button className="feedback-entry" onClick={() => go("feedback")}><span><CheckCircle2 size={21} /></span><span><small>{feedback ? "FEEDBACK SAVED" : "AFTER THE RUN"}</small><strong>{feedback ? "Review or update your result." : "Tell us what actually happened."}</strong></span><ChevronRight size={20} /></button>
+        </>}
+      </div>
+      <BottomNav screen="plan" go={go} />
     </section>
   );
 }
 
-function Feedback({ go, save }: { go: (screen: Screen) => void; save: () => void }) {
-  const [effort, setEffort] = useState(3);
-  const [heat, setHeat] = useState("MODERATE");
+function PlanEditor({ weather, initial, save, go }: { weather: WeatherSnapshot; initial: RunPlan | null; save: (plan: RunPlan) => void; go: (value: Screen) => void }) {
+  const today = localDateParts(weather.timeZone);
+  const [draft, setDraft] = useState<RunPlan>(initial || {
+    id: crypto.randomUUID(), type: "Tempo", date: addLocalDays(today, 1), time: "18:30", duration: 60, distance: "6", flexibility: 120, indoor: true, note: "", status: "scheduled", decision: null, createdAt: new Date().toISOString(),
+  });
+  const valid = draft.date >= today && draft.date <= addLocalDays(today, 3) && draft.time && draft.duration >= 15;
+  const update = <K extends keyof RunPlan>(key: K, value: RunPlan[K]) => setDraft((current) => ({ ...current, [key]: value }));
   return (
-    <section className="screen app-screen" data-screen="feedback">
-      <AppHeader eyebrow="PERSONAL RESPONSE" badge="RUNNING PRO" onBack={() => go("run")} />
-      <main className="screen-body feedback-body">
-        <p className="kicker">AFTER YOUR RUN</p>
-        <h1>How did the weather feel?</h1>
-        <p className="body-copy">Your answer changes future timing and pace suggestions. It does not change the public forecast.</p>
-        <div className="feedback-card">
-          <small>EFFORT VS. EXPECTED</small>
-          <strong>{["Much easier", "Easier", "As expected", "Harder", "Much harder"][effort - 1]}</strong>
-          <input aria-label="Effort compared with expected" type="range" min="1" max="5" value={effort} onChange={(event) => setEffort(Number(event.target.value))} />
-          <div className="range-labels"><span>EASIER</span><span>HARDER</span></div>
-        </div>
-        <div className="feedback-card">
-          <small>HEAT LOAD</small>
-          <div className="segmented-control">{["LOW", "MODERATE", "HIGH"].map((value) => <button key={value} className={heat === value ? "is-active" : ""} onClick={() => setHeat(value)}>{value}</button>)}</div>
-        </div>
-        <label className="feedback-card note-field"><small>OPTIONAL NOTE</small><textarea placeholder="Example: shaded sections felt much easier" /></label>
-        <button className="primary-button" onClick={save}>Save response <span>→</span></button>
-      </main>
-      <BottomNav screen="profile" go={go} />
+    <section className="screen fixed-screen" data-screen="editor">
+      <TopBar title={initial ? "EDIT RUN" : "ADD A RUN"} onBack={() => go("plan")} action={<span className="step-chip">72 H</span>} />
+      <div className="fixed-scroll editor-body">
+        <p className="kicker">THE PLAN YOU ALREADY HAVE</p><h1>What are you planning?</h1><p className="body-copy">Only time is adjusted in this MVP. Route, pace and training load stay yours.</p>
+        <fieldset><legend>Training type</legend><div className="choice-row">{["Easy", "Tempo", "Long run", "Race"].map((value) => <button type="button" key={value} className={draft.type === value ? "is-active" : ""} onClick={() => update("type", value)}>{value}</button>)}</div></fieldset>
+        <div className="field-grid"><label><span>Date</span><input type="date" min={today} max={addLocalDays(today, 3)} value={draft.date} onChange={(event) => update("date", event.target.value)} /></label><label><span>Start time</span><input type="time" value={draft.time} onChange={(event) => update("time", event.target.value)} /></label></div>
+        <div className="field-grid"><label><span>Duration</span><select value={draft.duration} onChange={(event) => update("duration", Number(event.target.value))}><option value={30}>30 min</option><option value={45}>45 min</option><option value={60}>60 min</option><option value={90}>90 min</option><option value={120}>120 min</option></select></label><label><span>Distance · optional</span><input inputMode="decimal" value={draft.distance} onChange={(event) => update("distance", event.target.value.replace(/[^0-9.]/g, ""))} placeholder="6" /></label></div>
+        <fieldset><legend>Time flexibility</legend><div className="choice-row">{[{ label: "Fixed", value: 0 }, { label: "± 30m", value: 30 }, { label: "± 1h", value: 60 }, { label: "± 2h", value: 120 }].map((item) => <button type="button" key={item.value} className={draft.flexibility === item.value ? "is-active" : ""} onClick={() => update("flexibility", item.value)}>{item.label}</button>)}</div></fieldset>
+        <label className="switch-row"><span><strong>Indoor alternative is possible</strong><small>The product can mention it, but will not book anything.</small></span><input type="checkbox" checked={draft.indoor} onChange={(event) => update("indoor", event.target.checked)} /><i /></label>
+        <label className="note-field"><span>Note · optional</span><textarea value={draft.note} onChange={(event) => update("note", event.target.value)} placeholder="Anything the recommendation should not assume" /></label>
+        {!valid && <p className="validation-note">Choose a run within the next 72 hours and at least 15 minutes long.</p>}
+      </div>
+      <footer className="action-dock"><button className="primary-button" disabled={!valid} onClick={() => save(draft)}>Save & check weather <ArrowRight size={20} /></button></footer>
     </section>
   );
 }
 
-function Modules({ selected, setSelected, go }: { selected: string[]; setSelected: (value: string[]) => void; go: (screen: Screen) => void }) {
-  const toggle = (id: string) => setSelected(selected.includes(id) ? selected.filter((item) => item !== id) : [...selected, id]);
+function AnalysisScreen({ weather, plan, recommendation, go }: { weather: WeatherSnapshot; plan: RunPlan; recommendation: Recommendation; go: (value: Screen) => void }) {
   return (
-    <section className="screen app-screen" data-screen="modules">
-      <AppHeader eyebrow="MODULES" badge={`${selected.length} ACTIVE`} />
-      <main className="screen-body modules-body">
-        <p className="kicker">MAKE WEATHER YOURS</p><h1>Go deeper only where it matters.</h1>
-        <p className="body-copy">Core modules organize the day. Pro modules add domain-specific variables and advice.</p>
-        <div className="module-list">{modules.map((module) => {
-          const ModuleIcon = module.icon;
-          const isActive = selected.includes(module.id);
-          return <button key={module.id} onClick={() => toggle(module.id)} className={isActive ? "is-active" : ""} aria-pressed={isActive}><span className="module-index"><ModuleIcon size={22} strokeWidth={1.8} /></span><div><small>{module.tier}</small><strong>{module.label}</strong><p>{module.note}</p></div><span className="module-status">{isActive ? <CheckCircle2 size={20} strokeWidth={2} /> : <Plus size={20} strokeWidth={1.8} />}<b>{isActive ? "Active" : "Add"}</b></span></button>;
-        })}</div>
-      </main>
-      <BottomNav screen="modules" go={go} />
+    <section className="screen detail-screen analysis-screen" data-screen="analysis">
+      <TopBar title="WEATHER DECISION" onBack={() => go("plan")} action={<SourceChip weather={weather} />} />
+      <div className="detail-scroll analysis-body">
+        <div className={`decision-hero is-${recommendation.state}`}><small>{recommendation.state === "good" ? "NO MATERIAL CONFLICT" : recommendation.state === "watch" ? "CONDITIONS TO WATCH" : "BETTER WINDOW FOUND"}</small><h1>{recommendation.title}</h1><p>{recommendation.summary}</p></div>
+        <div className="plan-context"><span><Footprints size={21} /></span><div><small>ORIGINAL PLAN</small><strong>{plan.type} · {displayDate(plan.date)} · {displayTime(plan.time)}</strong><p>{plan.duration} min · {weather.location.name} · {plan.flexibility ? `± ${plan.flexibility} min` : "Fixed time"}</p></div></div>
+        <p className="kicker">WHY THIS DECISION</p>
+        <div className="evidence-card"><div className="weather-curve"><i /><i /><i /><span style={{ left: "38%" }} /><b style={{ left: recommendation.state === "change" ? "66%" : "44%" }} /></div><div className="curve-labels"><span>{displayTime(minutesToTime(timeToMinutes(plan.time) - plan.flexibility))}</span><span>{displayTime(plan.time)}</span><span>{displayTime(minutesToTime(timeToMinutes(plan.time) + plan.flexibility))}</span></div><strong>{recommendation.reason}</strong><p>Weather × plan × the time range you allowed</p></div>
+        <div className="evidence-grid">{recommendation.evidence.map((item, index) => <div key={item}><small>{index === 0 ? "TEMP" : index === 1 ? "RAIN" : "WIND"}</small><strong>{item}</strong></div>)}</div>
+        <div className="explain-card"><AlertTriangle size={18} /><span><strong>Advice, not a safety guarantee.</strong><small>Official NWS alerts take priority. Route and pace are not changed in this MVP.</small></span></div>
+        <button className="primary-button" onClick={() => go("confirm")}>{recommendation.state === "change" ? "Review the time change" : "Make my decision"} <ArrowRight size={20} /></button>
+      </div>
     </section>
   );
 }
 
-function Profile({ go, reset }: { go: (screen: Screen) => void; reset: () => void }) {
+function ConfirmScreen({ weather, plan, recommendation, decide, go }: { weather: WeatherSnapshot; plan: RunPlan; recommendation: Recommendation; decide: (decision: Exclude<Decision, null>) => void; go: (value: Screen) => void }) {
+  const changed = recommendation.state === "change" && recommendation.recommendedTime !== plan.time;
   return (
-    <section className="screen app-screen" data-screen="profile">
-      <AppHeader eyebrow="YOU" badge="AUSTIN" />
-      <main className="screen-body profile-body">
-        <div className="profile-mark">AB</div><h1>Weather that learns with permission.</h1>
-        <div className="profile-stat-grid"><div><small>ACTIVE MODULES</small><strong>5</strong></div><div><small>PLANS ADAPTED</small><strong>12</strong></div></div>
-        <div className="settings-list"><button><span>Locations</span><i>Austin + 1</i></button><button><span>Calendar</span><i>Connected</i></button><button><span>Apple Watch</span><i>Connected</i></button><button><span>Motion</span><i>System setting</i></button><a href="/design-system/"><span>Design system</span><i>Open canvas</i></a></div>
-        <button className="secondary-button" onClick={reset}>Reset demo</button>
-      </main>
-      <BottomNav screen="profile" go={go} />
+    <section className="screen fixed-screen" data-screen="confirm">
+      <TopBar title="CONFIRM DECISION" onBack={() => go("analysis")} />
+      <div className="fixed-scroll confirm-body">
+        <p className="kicker">YOU STAY IN CONTROL</p><h1>{changed ? "Change the time?" : "Keep the plan?"}</h1><p className="body-copy">The Demo updates only its own plan. It does not claim to write Calendar, Watch or another service.</p>
+        <div className="comparison-card"><div><small>ORIGINAL</small><strong>{displayTime(plan.time)}</strong><p>{recommendation.originalHour.precipitation}% rain · {recommendation.originalHour.windSpeed} mph</p></div><ArrowRight size={20} /><div className={changed ? "is-recommended" : ""}><small>{changed ? "RECOMMENDED" : "CURRENT"}</small><strong>{displayTime(recommendation.recommendedTime)}</strong><p>{recommendation.recommendedHour.precipitation}% rain · {recommendation.recommendedHour.windSpeed} mph</p></div></div>
+        <div className="decision-actions">
+          {changed && <button className="primary-button" onClick={() => decide("accepted")}><Check size={19} /> Move to {displayTime(recommendation.recommendedTime)}</button>}
+          <button className={changed ? "secondary-button" : "primary-button"} onClick={() => decide("kept")}><Footprints size={19} /> Keep {displayTime(plan.time)}</button>
+          <button className="text-action" onClick={() => { track("recommendation_decided", { decision: "edit" }); go("editor"); }}><Pencil size={17} /> Edit it myself</button>
+        </div>
+        <div className="source-proof"><Database size={18} /><span><strong>{weather.state === "live" ? "Based on live NWS data" : "Based on marked Demo data"}</strong><small>Rules v0.8 · Recommendation expires when the weather snapshot changes.</small></span></div>
+      </div>
     </section>
   );
 }
 
-export default function Home() {
+function ChangeScreen({ plan, recommendation, go }: { plan: RunPlan; recommendation: Recommendation; go: (value: Screen) => void }) {
+  return (
+    <section className="screen detail-screen change-screen" data-screen="change">
+      <WeatherScene condition="storm" />
+      <TopBar title="WEATHER CHANGED" onBack={() => go("plan")} />
+      <div className="detail-scroll change-body">
+        <span className="change-chip"><Bell size={16} /> TEST NOTIFICATION</span><h1>Rain risk increased near your run.</h1><p>This screen demonstrates the re-check path. It does not send a real push notification.</p>
+        <div className="change-compare"><div><small>PREVIOUS SNAPSHOT</small><strong>{Math.max(8, recommendation.originalHour.precipitation - 34)}% rain</strong></div><ArrowRight size={18} /><div><small>UPDATED SCENARIO</small><strong>88% rain</strong></div></div>
+        <button className="primary-button" onClick={() => go("analysis")}>Re-check {displayTime(plan.time)} <ArrowRight size={20} /></button>
+        <button className="secondary-button" onClick={() => go("plan")}>Dismiss test</button>
+        <p className="source-foot">Live product rule: store the prior data snapshot, identify the material change and make the previous recommendation visibly expire.</p>
+      </div>
+    </section>
+  );
+}
+
+function FeedbackScreen({ current, submit, go }: { current: Feedback | null; submit: (value: Feedback) => void; go: (value: Screen) => void }) {
+  const [draft, setDraft] = useState<Feedback>(current || { completed: "yes", feel: "right", useful: "yes", note: "" });
+  const set = <K extends keyof Feedback>(key: K, value: Feedback[K]) => setDraft((state) => ({ ...state, [key]: value }));
+  return (
+    <section className="screen fixed-screen" data-screen="feedback">
+      <TopBar title="AFTER THE RUN" onBack={() => go("plan")} />
+      <div className="fixed-scroll feedback-body">
+        <p className="kicker">REAL OUTCOME</p><h1>What actually happened?</h1><p className="body-copy">This result helps evaluate the rule. The Demo does not claim an automatic personal model has already learned.</p>
+        <fieldset><legend>Did you complete the run?</legend><div className="choice-row three">{(["yes", "partial", "no"] as const).map((value) => <button key={value} className={draft.completed === value ? "is-active" : ""} onClick={() => set("completed", value)}>{value === "yes" ? "Yes" : value === "partial" ? "Partly" : "No"}</button>)}</div></fieldset>
+        <fieldset><legend>How did the conditions feel?</legend><div className="choice-row three">{(["cool", "right", "hot"] as const).map((value) => <button key={value} className={draft.feel === value ? "is-active" : ""} onClick={() => set("feel", value)}>{value === "cool" ? "Cool" : value === "right" ? "Right" : "Hot"}</button>)}</div></fieldset>
+        <fieldset><legend>Was the weather decision useful?</legend><div className="choice-row three">{(["yes", "somewhat", "no"] as const).map((value) => <button key={value} className={draft.useful === value ? "is-active" : ""} onClick={() => set("useful", value)}>{value === "yes" ? "Yes" : value === "somewhat" ? "Somewhat" : "No"}</button>)}</div></fieldset>
+        <label className="note-field"><span>What should have been different? · optional</span><textarea value={draft.note} onChange={(event) => set("note", event.target.value)} placeholder="Short, specific feedback" /></label>
+      </div>
+      <footer className="action-dock"><button className="primary-button" onClick={() => submit(draft)}>Save the outcome <Check size={20} /></button></footer>
+    </section>
+  );
+}
+
+function SettingsScreen({ weather, plan, reset, chooseLocation, go }: { weather: WeatherSnapshot; plan: RunPlan | null; reset: () => void; chooseLocation: () => void; go: (value: Screen) => void }) {
+  return (
+    <section className="screen app-screen" data-screen="settings">
+      <TopBar title="YOU" />
+      <div className="app-scroll settings-body">
+        <span className="profile-mark">BK</span><p className="kicker">MVP TEST PROFILE</p><h1>Weather stays useful before it gets complicated.</h1>
+        <div className="profile-stats"><div><small>LOCATION</small><strong>{weather.location.name}</strong></div><div><small>RUN PLAN</small><strong>{plan ? "1 active" : "None"}</strong></div></div>
+        <div className="settings-list">
+          <button onClick={chooseLocation}><MapPin size={19} /><span><strong>Primary location</strong><small>{weather.resolvedName}</small></span><ChevronRight size={19} /></button>
+          <a href={SOURCE_URL} target="_blank" rel="noreferrer"><Database size={19} /><span><strong>Weather source</strong><small>{weather.state === "live" ? "National Weather Service · live" : "Demo fallback · live retry available"}</small></span><ChevronRight size={19} /></a>
+          <button onClick={() => go("change")} disabled={!plan}><Bell size={19} /><span><strong>Weather-change test</strong><small>{plan ? "Preview the re-check experience" : "Add a run first"}</small></span><ChevronRight size={19} /></button>
+          <div><Settings2 size={19} /><span><strong>Running Pro price test</strong><small>Not active · price remains to be tested</small></span><i>—</i></div>
+        </div>
+        <div className="privacy-card"><strong>No account. No cloud profile.</strong><p>This static Demo stores plans and feedback in this browser. It contains no private supplier key and performs no external Calendar, Watch or payment write.</p></div>
+        <button className="reset-button" onClick={reset}><RotateCcw size={18} /> Reset this Demo</button>
+      </div>
+      <BottomNav screen="settings" go={go} />
+    </section>
+  );
+}
+
+export default function Page() {
   const [screen, setScreen] = useState<Screen>("welcome");
-  const [scenario, setScenario] = useState<Scenario>("clear");
-  const [selected, setSelected] = useState(["everyday", "commute", "meetings", "running"]);
-  const [choice, setChoice] = useState<Adaptation | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState("");
-  const [labOpen, setLabOpen] = useState(false);
+  const [onboarded, setOnboarded] = useState(false);
+  const [location, setLocation] = useState<LocationOption>(LOCATIONS[0]);
+  const [weather, setWeather] = useState<WeatherSnapshot>(() => fallbackWeather(LOCATIONS[0]));
+  const [loadingWeather, setLoadingWeather] = useState(false);
+  const [mode, setModeState] = useState<ScenarioMode>("live");
+  const [plan, setPlan] = useState<RunPlan | null>(null);
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const state = window.localStorage.getItem("weather-demo-v05");
-    if (state) {
-      try {
-        const parsed = JSON.parse(state);
-        if (parsed.selected) setSelected(parsed.selected);
-        if (parsed.saved) setSaved(parsed.saved);
-      } catch { /* Keep the fresh demo state. */ }
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+      if (saved) {
+        setOnboarded(Boolean(saved.onboarded));
+        setLocation(LOCATIONS.find((item) => item.id === saved.locationId) || LOCATIONS[0]);
+        setModeState(saved.mode || "live");
+        setPlan(saved.plan || null);
+        setFeedback(saved.feedback || null);
+        setScreen(saved.onboarded ? "home" : "welcome");
+      }
+    } catch {
+      localStorage.removeItem(STORAGE_KEY);
+    } finally {
+      setReady(true);
     }
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem("weather-demo-v05", JSON.stringify({ selected, saved }));
-  }, [selected, saved]);
+    if (!ready) return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ onboarded, locationId: location.id, mode, plan, feedback }));
+  }, [ready, onboarded, location, mode, plan, feedback]);
+
+  const loadWeather = useCallback(async () => {
+    setLoadingWeather(true);
+    try {
+      const live = await fetchNwsWeather(location);
+      setWeather(live);
+      track("weather_loaded", { source: "nws", location: location.id, cached: false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "NWS request failed";
+      setWeather(fallbackWeather(location, message));
+      track("weather_loaded", { source: "fallback", location: location.id, issue: message });
+    } finally {
+      setLoadingWeather(false);
+    }
+  }, [location]);
 
   useEffect(() => {
-    if (!toast) return;
-    const timer = window.setTimeout(() => setToast(""), 2600);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
+    if (ready && onboarded) loadWeather();
+  }, [ready, onboarded, loadWeather]);
 
-  const go = (next: Screen) => { setScreen(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
-  const apply = () => {
-    if (!choice) return;
-    setLoading(true);
-    window.setTimeout(() => { setLoading(false); setSaved(true); setToast("Plan updated on Calendar and Watch"); }, 850);
+  const visibleWeather = useMemo(() => displaySnapshot(weather, mode), [weather, mode]);
+  const recommendation = useMemo(() => plan ? findRecommendation(plan, visibleWeather) : null, [plan, visibleWeather]);
+
+  const go = (value: Screen) => {
+    setScreen(value);
+    track("screen_viewed", { screen: value });
   };
+
+  const flash = (message: string) => {
+    setToast(message);
+    window.setTimeout(() => setToast(null), 2600);
+  };
+
+  const finishLocation = (value: LocationOption) => {
+    const changed = value.id !== location.id;
+    setLocation(value);
+    setOnboarded(true);
+    setModeState("live");
+    go("home");
+    if (changed) flash(`Loading ${value.name} weather`);
+  };
+
+  const savePlan = (value: RunPlan) => {
+    const next = { ...value, decision: value.id === plan?.id ? plan.decision : null };
+    setPlan(next);
+    setFeedback(null);
+    track("run_plan_created", { type: next.type, duration: next.duration, flexibility: next.flexibility });
+    go("analysis");
+  };
+
+  const decide = (decision: Exclude<Decision, null>) => {
+    if (!plan || !recommendation) return;
+    const accepted = decision === "accepted" && recommendation.state === "change";
+    setPlan({ ...plan, originalTime: accepted ? plan.time : plan.originalTime, time: accepted ? recommendation.recommendedTime : plan.time, decision });
+    track("recommendation_decided", { decision, state: recommendation.state, source: weather.state });
+    flash(accepted ? `Run moved to ${displayTime(recommendation.recommendedTime)}` : "Original plan kept");
+    go("plan");
+  };
+
+  const submitFeedback = (value: Feedback) => {
+    setFeedback(value);
+    if (plan) setPlan({ ...plan, status: value.completed === "no" ? "cancelled" : "completed" });
+    track("run_feedback_submitted", value);
+    flash("Outcome saved in this browser");
+    go("plan");
+  };
+
+  const setMode = (value: ScenarioMode) => {
+    setModeState(value);
+    track("weather_scenario_changed", { mode: value });
+  };
+
   const reset = () => {
-    window.localStorage.removeItem("weather-demo-v05");
-    setSelected(["everyday", "commute", "meetings", "running"]); setChoice(null); setSaved(false); setScenario("clear"); setScreen("welcome");
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(`${STORAGE_KEY}-events`);
+    setOnboarded(false); setLocation(LOCATIONS[0]); setWeather(fallbackWeather(LOCATIONS[0])); setModeState("live"); setPlan(null); setFeedback(null); setScreen("welcome");
   };
-  const activeStep = useMemo(() => {
-    const labels: Record<Screen, string> = { welcome: "01 Welcome", setup: "02 Personalize", home: "03 Today", planner: "04 Plan", storm: "05 Weather detail", run: "06 Running Pro", feedback: "07 Learn", modules: "08 Modules", profile: "09 You" };
-    return labels[screen];
-  }, [screen]);
+
+  const renderScreen = () => {
+    if (screen === "welcome") return <Welcome onStart={() => go("location")} onPreview={() => finishLocation(LOCATIONS[0])} />;
+    if (screen === "location") return <LocationScreen selected={location} choose={finishLocation} onBack={() => go(onboarded ? "home" : "welcome")} />;
+    if (screen === "home") return <HomeScreen weather={visibleWeather} mode={mode} setMode={setMode} plan={plan} recommendation={recommendation} go={go} refresh={loadWeather} />;
+    if (screen === "forecast") return <ForecastScreen weather={visibleWeather} go={go} />;
+    if (screen === "alert") return <AlertScreen weather={visibleWeather} go={go} />;
+    if (screen === "outfit") return <OutfitScreen weather={visibleWeather} go={go} />;
+    if (screen === "plan") return <PlanScreen weather={visibleWeather} plan={plan} recommendation={recommendation} feedback={feedback} go={go} removePlan={() => { setPlan(null); setFeedback(null); flash("Run removed"); }} />;
+    if (screen === "editor") return <PlanEditor weather={visibleWeather} initial={plan} save={savePlan} go={go} />;
+    if (screen === "analysis" && plan && recommendation) return <AnalysisScreen weather={visibleWeather} plan={plan} recommendation={recommendation} go={go} />;
+    if (screen === "confirm" && plan && recommendation) return <ConfirmScreen weather={visibleWeather} plan={plan} recommendation={recommendation} decide={decide} go={go} />;
+    if (screen === "change" && plan && recommendation) return <ChangeScreen plan={plan} recommendation={recommendation} go={go} />;
+    if (screen === "feedback" && plan) return <FeedbackScreen current={feedback} submit={submitFeedback} go={go} />;
+    if (screen === "settings") return <SettingsScreen weather={visibleWeather} plan={plan} reset={reset} chooseLocation={() => go("location")} go={go} />;
+    return <PlanScreen weather={visibleWeather} plan={plan} recommendation={recommendation} feedback={feedback} go={go} removePlan={() => setPlan(null)} />;
+  };
 
   return (
     <main className="demo-shell">
       <aside className="demo-guide">
-        <div><span className="guide-version">V0.5 · WEATHER IN MOTION</span><h1>Weather is the product.<br />Motion explains change.</h1><p>Clear, rain and storm now carry their own atmosphere, forecast state and motion language.</p><a className="canvas-link" href="/design-system/">Open design system canvas <ArrowRight size={16} /></a></div>
-        <ol>{["Welcome & choose context", "Read today’s weather", "See plan impact", "Inspect storm detail", "Choose a Pro adaptation", "Apply and teach the model"].map((item, index) => <li key={item} className={activeStep.startsWith(String(index + 1).padStart(2, "0")) ? "is-active" : ""}><span>{String(index + 1).padStart(2, "0")}</span>{item}</li>)}</ol>
-        <div className="guide-foot"><span>ACTIVE SCREEN</span><strong>{activeStep}</strong><button onClick={reset}>Restart demo</button></div>
+        <div><span className="guide-version">WEATHER · MVP V5.2 · DEMO V0.8</span><h1>From forecast<br />to one decision.</h1><p>A weather-first prototype for testing whether a real runner changes a real plan.</p></div>
+        <ol>{["Live U.S. weather", "Add one run", "Understand the advice", "Accept or keep", "Record the outcome"].map((label, index) => <li key={label} className={index === (["welcome", "location", "home", "forecast", "alert", "outfit"].includes(screen) ? 0 : screen === "editor" || screen === "plan" ? 1 : screen === "analysis" ? 2 : screen === "confirm" || screen === "change" ? 3 : screen === "feedback" ? 4 : 0) ? "is-active" : ""}><span>0{index + 1}</span>{label}</li>)}</ol>
+        <div className="guide-foot"><span>SCREEN</span><strong>{screenLabels[screen]}</strong><a href={SOURCE_URL} target="_blank" rel="noreferrer">NWS source ↗</a></div>
       </aside>
-      <div className="phone-wrap">
-        <div className="phone-status"><span>9:41</span><i /><b /></div>
-        <div className="phone-canvas">
-          {screen === "welcome" && <Welcome onStart={() => go("setup")} onPreview={() => go("home")} />}
-          {screen === "setup" && <Setup selected={selected} setSelected={setSelected} onComplete={() => go("home")} onBack={() => go("welcome")} />}
-          {screen === "home" && <HomeScreen scenario={scenario} setScenario={setScenario} go={go} selected={selected} saved={saved} />}
-          {screen === "planner" && <Planner go={go} saved={saved} />}
-          {screen === "storm" && <StormDetail go={go} scenario={scenario} setScenario={setScenario} />}
-          {screen === "run" && <RunningPro go={go} choice={choice} setChoice={setChoice} saved={saved} apply={apply} />}
-          {screen === "feedback" && <Feedback go={go} save={() => { setToast("Personal response saved"); go("home"); }} />}
-          {screen === "modules" && <Modules selected={selected} setSelected={setSelected} go={go} />}
-          {screen === "profile" && <Profile go={go} reset={reset} />}
-        </div>
-      </div>
-      <button className="lab-trigger" onClick={() => setLabOpen(!labOpen)} aria-expanded={labOpen}>WEATHER LAB <span>{labOpen ? "×" : "+"}</span></button>
-      {labOpen && <div className="weather-lab"><small>DEMO SCENARIO</small>{(["clear", "rain", "storm"] as Scenario[]).map((value) => <button key={value} className={scenario === value ? "is-active" : ""} onClick={() => { setScenario(value); if (screen === "welcome" || screen === "setup") go("home"); }}>{value.toUpperCase()}</button>)}</div>}
-      {loading && <div className="loading-overlay" role="status"><div className="loading-ring" /><strong>Updating your plan…</strong><span>Calendar and Watch</span></div>}
-      {toast && <button className="toast" onClick={() => setToast("")}><span>✓</span>{toast}</button>}
+      <div className="phone-wrap"><PhoneStatus /><div className="phone-canvas">{renderScreen()}</div>{loadingWeather && <div className="loading-overlay"><div className="loading-ring" /><strong>Loading NWS weather</strong><span>Forecast · observation · alerts</span></div>}</div>
+      {toast && <button className="toast" onClick={() => setToast(null)}><CheckCircle2 size={20} /><span>{toast}</span></button>}
     </main>
   );
 }
