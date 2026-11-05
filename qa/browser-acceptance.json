@@ -1,5 +1,5 @@
 {
-  "base": "http://127.0.0.1:4191/weather-v1/",
+  "base": "https://dodgey512-blake.github.io/weather-v1/",
   "checks": [
     "Default language is Simplified Chinese",
     "City selection does not prematurely navigate",
@@ -21,6 +21,6 @@
     "No runtime page errors"
   ],
   "errors": [],
-  "liveSource": "fresh",
-  "at": "2026-11-05T12:09:02.660Z"
+  "liveSource": "partial",
+  "at": "2026-11-05T14:10:27.127Z"
 }
