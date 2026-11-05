@@ -1,0 +1,26 @@
+{
+  "base": "http://127.0.0.1:4191/weather-v1/",
+  "checks": [
+    "Default language is Simplified Chinese",
+    "City selection does not prematurely navigate",
+    "Weather uses a labeled live snapshot",
+    "Settings changes language to English",
+    "OOTD feedback survives reopening",
+    "Plan stores its own location and absolute start time",
+    "Browsing a different city keeps the plan location/time",
+    "Language switching preserves units and absolute time",
+    "Rain uses closed droplet paths",
+    "Droplet animation moves in the rendered app",
+    "Scenario replay updates the actual analysis input",
+    "Scenario playback preserves the real plan",
+    "Reduced motion disables rain/flash",
+    "Navigation remains in viewport 320x568",
+    "Navigation remains in viewport 375x812",
+    "Navigation remains in viewport 844x390",
+    "Price intent records an experiment, not a charge",
+    "No runtime page errors"
+  ],
+  "errors": [],
+  "liveSource": "fresh",
+  "at": "2026-11-05T12:09:02.660Z"
+}

@@ -1,29 +1,19 @@
-import type { CSSProperties } from "react";
-import type { WeatherCondition } from "./weather";
-
-export default function WeatherScene({ condition, compact = false }: { condition: WeatherCondition; compact?: boolean }) {
-  return (
-    <div className={`weather-scene weather-${condition} ${compact ? "is-compact" : ""}`} data-weather-motion={condition} aria-hidden="true">
-      <div className="weather-wash" />
-      <div className="sun-disc"><span>{Array.from({ length: 12 }, (_, index) => <i key={index} style={{ "--ray": index } as CSSProperties} />)}</span></div>
-      <div className="cloud cloud-one"><i /><i /><i /></div>
-      <div className="cloud cloud-two"><i /><i /><i /></div>
-      <div className="cloud cloud-three"><i /><i /><i /></div>
-      <div className="rain-layer rain-back">
-        {Array.from({ length: 12 }, (_, index) => (
-          <svg key={index} className="rain-drop" style={{ "--drop": index } as CSSProperties} viewBox="0 0 16 22"><path d="M8 1C8 1 1.5 9.2 1.5 13.6a6.5 6.5 0 0 0 13 0C14.5 9.2 8 1 8 1Z" /></svg>
-        ))}
-      </div>
-      <div className="rain-layer rain-front">
-        {Array.from({ length: 18 }, (_, index) => (
-          <svg key={index} className="rain-drop" style={{ "--drop": index } as CSSProperties} viewBox="0 0 16 22"><path d="M8 1C8 1 1.5 9.2 1.5 13.6a6.5 6.5 0 0 0 13 0C14.5 9.2 8 1 8 1Z" /></svg>
-        ))}
-      </div>
-      <div className="wind-streaks">{Array.from({ length: 6 }, (_, index) => <i key={index} style={{ "--wind": index } as CSSProperties} />)}</div>
-      <div className="rain-ripples">{Array.from({ length: 4 }, (_, index) => <i key={index} style={{ "--ripple": index } as CSSProperties} />)}</div>
-      <svg className="lightning" viewBox="0 0 90 150"><path d="M55 3 17 82h31l-13 65 42-86H48L55 3Z" /></svg>
-      <div className="storm-flash" />
-      <div className="weather-horizon" />
-    </div>
-  );
+import type { CSSProperties } from 'react';
+import type { Condition } from './core';
+export default function WeatherScene({ condition = 'clear', isDay = true, windKmh = 8, windDirectionDeg, pop = 0, reduced = false }: { condition?: Condition; isDay?: boolean; windKmh?: number | null; windDirectionDeg?: number | null; pop?: number | null; reduced?: boolean }) {
+  const wet = condition === 'rain' || condition === 'storm';
+  const direction = windDirectionDeg == null ? -1 : Math.sin((windDirectionDeg + 180) * Math.PI / 180);
+  const angle = Math.max(-30, Math.min(30, (windKmh || 0) * .6 * direction));
+  return <div className={`sky-scene condition-${condition} ${isDay ? 'is-day' : 'is-night'} ${reduced ? 'is-still' : ''}`} style={{ '--rain-angle': `${angle}deg` } as CSSProperties} aria-hidden="true">
+    <div className="sky-atmosphere" /><div className="sky-grain" />
+    {(condition === 'clear' || condition === 'cloud') && <><div className="celestial-glow" /><div className="celestial-body"><span /></div></>}
+    {!isDay && (condition === 'clear' || condition === 'cloud') && <div className="star-field">{Array.from({ length: 19 }, (_, i) => <i key={i} style={{ '--star': i } as CSSProperties} />)}</div>}
+    <div className="sky-cloud cloud-far"><i /><i /><i /><i /></div><div className="sky-cloud cloud-near"><i /><i /><i /><i /></div><div className="sky-cloud cloud-edge"><i /><i /><i /><i /></div>
+    {wet && <>{['back-drops', 'front-drops'].map((layer, j) => <div key={layer} className={`drop-layer ${layer}`}>{Array.from({ length: j ? condition === 'storm' ? 24 : 16 : 12 }, (_, i) => <svg className="drop" key={i} viewBox="0 0 16 25" style={{ '--i': i, '--density': (pop || 60) / 100 } as CSSProperties}><path d="M8 1C6.5 4.4 1.5 11 1.5 16a6.5 6.5 0 0 0 13 0C14.5 11 9.5 4.4 8 1Z" /><path className="drop-shine" d="M4 14c-1 3 .2 5 2 5" /></svg>)}</div>)}<div className="water-ripples"><i /><i /><i /></div></>}
+    {condition === 'storm' && <><div className="sky-flash" /><svg className="sky-lightning" viewBox="0 0 40 80"><path d="M25 0 3 42h17l-6 38 24-48H22Z" /></svg></>}
+    {condition === 'snow' && <div className="snowflakes">{Array.from({ length: 22 }, (_, i) => <i key={i} style={{ '--i': i } as CSSProperties}>✦</i>)}</div>}
+    {condition === 'fog' && <div className="fog-banks"><i /><i /><i /></div>}
+    {condition === 'wind' && <div className="wind-ribbons"><i /><i /><i /></div>}
+    <div className="sky-bottom-shade" />
+  </div>;
 }

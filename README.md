@@ -1,30 +1,41 @@
-# Weather V0.8 · MVP V5.2 可执行版
+# 天气 Weather V1.0
 
-V0.8 是基于《天气应用 MVP V5.2》的首个完整可执行版本。V0.5 已以 Git tag `v0.5.0` 保留，本版本不覆盖旧版记录。
+面向美国地点的双语天气 MVP。默认简体中文，设置内切换英文；日常天气与穿衣免费，跑步计划使用完整训练时段比较时间。
 
-## 可验收主链路
+1. [公开 Demo](https://dodgey512-blake.github.io/weather-v1/)
+2. [完整产品需求](https://my.feishu.cn/docx/I3D8dzrg4oW6pCx0nldcrkD5nFb)
+3. [VIS 2.0 与动态 SVG 组件画布](https://dodgey512-blake.github.io/weather-v1/vis-2/)
+4. [Weather design skill](https://dodgey512-blake.github.io/weather-v1/vis-2/downloads/weather-design-skill.zip)
+5. [Android APK](https://dodgey512-blake.github.io/weather-v1/downloads/Weather-V1.0.apk) · [Android Studio 工程](https://dodgey512-blake.github.io/weather-v1/downloads/Weather-V1.0-AndroidStudio.zip)
 
-1. 选择 Austin、New York、Seattle 或 Denver。
-2. 读取美国 National Weather Service 的实时观测、72 小时预报和官方预警。
-3. 在首页切换 Live / Clear / Rain / Storm，检查对应天气动效；Rain 与 Storm 使用闭合 SVG 雨滴，不使用长直线代替。
-4. 查看 OOTD Lite 并记录冷 / 合适 / 热反馈。
-5. 新建未来 72 小时内的一次跑步计划，获得 Keep / Watch / Change 建议。
-6. 接受建议、保留原计划或自行编辑；Demo 只更新本地计划，不伪装成 Calendar、Watch 或支付写入。
-7. 测试天气变化后的重新判断，并提交跑后反馈。
+## 使用
 
-## 数据与边界
+选择地点 → 查看天气 / 今日穿衣 → 添加未来72小时内的一条跑步计划 → 阅读整段天气与建议 → 接受、保留或编辑 → 查看重要变化 → 训练后反馈。
 
-- 实时数据：美国 NWS 无密钥公开 API。
-- 降级：NWS 不可用时，明确显示 `DEMO DATA` 与失败提示，不把模拟数据伪装为实时数据。
-- 本地状态：`localStorage`，无账号、无云端个人档案。
-- 旧组件库：`/design-system/` 继续展示 V0.5 动态 SVG 大画布。
+1. 地点与计划的时区独立保存，浏览其他城市不改变已有计划。
+2. Fixed不改期；缺数据、失效或无可用户外窗口均有明确状态。
+3. 设置提供语言、单位、深浅色、动态、玻璃、通知、本机导出与重置。
+4. 情景演练使用隔离快照，不改真实计划或实验记录。
+5. 价格意向只作自愿研究，不收费或创建订阅。
 
-## 本地验收
+## 数据和运行边界
+
+天气与官方预警来自NWS；地点搜索与CAMS模型AQI经Open-Meteo获取。CAMS为模型预报，非AirNow地面实测。免费公开服务用于非商业评估，商业部署需要落实供应商许可、自有服务端和监控。
+
+计划、反馈与实验事件保存在本机，可导出JSON；无账户或中央分析后台。天气变化检查在前台和恢复前台时运行，不承诺关闭应用后的后台远程推送。Android为本地资源WebView混合宿主，平台权限和导出桥由原生层提供。真实购买、正式商店签名、美国用户验证和真机验收另行完成。
+
+## 开发与发布
+
+Node 24。保留现有Next/React静态导出，basePath为`/weather-v1`。
 
 ```bash
 npm ci
-npm run lint
 npm test
+npm run lint
+npm run build
+npm run release:site
 ```
 
-发布目标：<https://dodgey512-blake.github.io/>
+`out/`是新版本；`dist/weather-v1/`是新版公开目录。`archive/v0.8-site/`是独立保存的原站，发布时复制到`dist/`根目录，保留原URL与组件库。工作流上传`dist/`，不会用新版首页覆盖旧入口。
+
+浏览器操作回归在`qa/flows.cjs`，状态回归在`qa/states.cjs`；测试使用独立浏览器与明确的供应商fixture。Android Studio工程和本地验收记录位于项目的`Android/WeatherV1/`，公开工程包可独立导入。

@@ -11,12 +11,17 @@ const eslintConfig = defineConfig([
       "react-hooks/set-state-in-effect": "off",
     },
   },
+  { files: ["qa/**/*.cjs"], rules: { "@typescript-eslint/no-require-imports": "off" } },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
     "out/**",
     "build/**",
+    "archive/**",
+    "dist/**",
+    ".qa-server/**",
+    "public/vis-2/downloads/**",
     "next-env.d.ts",
   ]),
 ]);

@@ -1,0 +1,148 @@
+{
+  "base": "http://127.0.0.1:4191/weather-v1/",
+  "fixtureNotice": "Every supplier response is an isolated QA fixture. No screenshot or result is a live-weather claim.",
+  "at": "2026-11-05T13:47:25.466Z",
+  "checks": [
+    {
+      "name": "Future run cannot open feedback from the plan action",
+      "detail": null
+    },
+    {
+      "name": "Direct future-feedback route has no form or save action",
+      "detail": null
+    },
+    {
+      "name": "Ended-run feedback starts with no positive or negative choice",
+      "detail": null
+    },
+    {
+      "name": "Empty feedback is validated without creating an outcome",
+      "detail": null
+    },
+    {
+      "name": "Saving an outcome completes the run and removes the active plan",
+      "detail": null
+    },
+    {
+      "name": "A separate new plan can be added after completion",
+      "detail": null
+    },
+    {
+      "name": "Past local start is rejected in the UI and no plan is persisted",
+      "detail": null
+    },
+    {
+      "name": "Fixed start with storm shows no time-change control",
+      "detail": null
+    },
+    {
+      "name": "Keep state does not show a contradictory alternate-time comparison",
+      "detail": null
+    },
+    {
+      "name": "Supplier change generates a notice with actual old/new values and snapshot IDs",
+      "detail": null
+    },
+    {
+      "name": "Opening a change message marks it read and analyzes the same plan",
+      "detail": null
+    },
+    {
+      "name": "Confirming a change updates the persisted start and decision record",
+      "detail": {
+        "proposedText": "确认改到 12:00"
+      }
+    },
+    {
+      "name": "Weather changed while confirm was open: old advice cannot update the plan",
+      "detail": null
+    },
+    {
+      "name": "Storage failure keeps the form and input, and does not claim plan saved",
+      "detail": null
+    },
+    {
+      "name": "Draft survives browser refresh after a failed save",
+      "detail": null
+    },
+    {
+      "name": "Browser history returns to the editor without losing the saved plan",
+      "detail": null
+    },
+    {
+      "name": "Saved plan keeps its independent location and absolute time on refresh",
+      "detail": null
+    },
+    {
+      "name": "Offline source failure preserves valid real cached content and original issue time",
+      "detail": null
+    },
+    {
+      "name": "Expired cache remains visible while definite decisions are blocked",
+      "detail": null
+    },
+    {
+      "name": "Reset test has multiple actual supplier responses deliberately pending",
+      "detail": null
+    },
+    {
+      "name": "Repeated foreground refreshes reuse the same in-flight NWS forecast",
+      "detail": {
+        "before": 1,
+        "whilePending": 2
+      }
+    },
+    {
+      "name": "Confirmed reset clears onboarding, plans, cache and events before release",
+      "detail": null
+    },
+    {
+      "name": "Old successful supplier responses cannot repopulate data after reset",
+      "detail": null
+    },
+    {
+      "name": "A fresh request after reset can load independently of the old generation",
+      "detail": null
+    },
+    {
+      "name": "Light theme applies immediately",
+      "detail": null
+    },
+    {
+      "name": "Dark theme applies immediately",
+      "detail": null
+    },
+    {
+      "name": "System theme responds to OS appearance changes",
+      "detail": null
+    },
+    {
+      "name": "Reduced-motion preference suppresses navigation transitions",
+      "detail": {
+        "transitionDuration": "0s"
+      }
+    },
+    {
+      "name": "No horizontal overflow and navigation visible at 320x568",
+      "detail": null
+    },
+    {
+      "name": "No horizontal overflow and navigation visible at 390x844",
+      "detail": null
+    },
+    {
+      "name": "No horizontal overflow and navigation visible at 844x390",
+      "detail": null
+    },
+    {
+      "name": "Settings and navigation interactive targets are at least 44 CSS px",
+      "detail": []
+    },
+    {
+      "name": "No uncaught runtime page errors in targeted state tests",
+      "detail": []
+    }
+  ],
+  "failures": [],
+  "runtimeErrors": []
+}

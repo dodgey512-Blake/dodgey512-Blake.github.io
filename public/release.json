@@ -1,0 +1,24 @@
+{
+  "version": "1.0.0",
+  "productRequirements": "MVP V6.0",
+  "visualSystem": "VIS 2.0",
+  "ruleVersion": "experimental-1.0",
+  "defaultLanguage": "zh-CN",
+  "languages": ["zh-CN", "en"],
+  "demo": "https://dodgey512-blake.github.io/weather-v1/",
+  "designSystem": "https://dodgey512-blake.github.io/weather-v1/vis-2/",
+  "document": "https://my.feishu.cn/docx/I3D8dzrg4oW6pCx0nldcrkD5nFb",
+  "storage": "local-device",
+  "weatherMonitoring": "foreground-and-resume",
+  "android": {
+    "package": "com.weatherpersonal.app",
+    "apkSha256": "28bed24785c6ee34da7cc92a3a884413a6cea9c3d9d804d4fa2dc443ac5c69c6",
+    "emulatorApi": 36,
+    "functionalChecksPassed": 8,
+    "physicalDeviceVerified": false,
+    "performanceVerified": false
+  },
+  "realPayments": false,
+  "backgroundRemotePush": false,
+  "airQuality": "CAMS model through Open-Meteo, not a local observation"
+}

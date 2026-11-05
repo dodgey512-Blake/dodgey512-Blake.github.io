@@ -40,3 +40,6 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+/.qa-server/
+/qa/screenshots/
+*.tsbuildinfo

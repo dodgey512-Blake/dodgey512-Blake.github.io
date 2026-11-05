@@ -1,0 +1,17 @@
+{
+  "id": "/weather-v1/",
+  "name": "天气 Weather",
+  "short_name": "Weather",
+  "description": "天气、日常穿衣与个人计划",
+  "lang": "zh-CN",
+  "start_url": "/weather-v1/",
+  "scope": "/weather-v1/",
+  "display": "standalone",
+  "background_color": "#091019",
+  "theme_color": "#091019",
+  "icons": [
+    {"src":"/weather-v1/icons/weather-192.png","sizes":"192x192","type":"image/png","purpose":"any"},
+    {"src":"/weather-v1/icons/weather-512.png","sizes":"512x512","type":"image/png","purpose":"any"},
+    {"src":"/weather-v1/favicon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}
+  ]
+}
