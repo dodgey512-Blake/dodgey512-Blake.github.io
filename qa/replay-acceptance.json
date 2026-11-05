@@ -1,0 +1,13 @@
+{
+  "base": "http://127.0.0.1:4191/weather-v1/",
+  "at": "2026-11-05T14:05:48.876Z",
+  "checks": [
+    "Clear scenario keeps the example time",
+    "Thunderstorm replay changes the complete-window decision",
+    "The chart includes the example training interval",
+    "Restore recovers the original decision",
+    "Scenario replay creates no real plan",
+    "No runtime errors"
+  ],
+  "errors": []
+}
