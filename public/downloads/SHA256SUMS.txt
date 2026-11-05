@@ -1,2 +1,2 @@
-42e4894874e59099756cda14a8144fa556c86bafa0d72307d358b8091e71f676  Weather-V1.0.apk
-4a1c4e8eefb0deff1bfea3e0bbf5b536a9ab695aad6c3058a3cc45b04ff6e1ef  Weather-V1.0-AndroidStudio.zip
+e2b6422e7a6fc6377e8d5d083a7707c7d0167f5cec900f7706a45df6bc85ed6e  Weather-V1.0.apk
+f9d5fb14c8d8767a6dfd000f5f2c16751db07add4a1af9574d7b0a6088643536  Weather-V1.0-AndroidStudio.zip
